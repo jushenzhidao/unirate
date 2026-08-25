@@ -29,7 +29,12 @@ linters-settings:
       - (*strings.Builder).Write
       - (*strings.Builder).WriteByte
   govet:
-    enable:
+    # 刻意不启用 shadow：它会把 Go 官方推荐的
+    #   if err := f(); err != nil { ... }
+    # 判定为 "declaration of err shadows declaration at ..."。
+    # 这类告警在本仓库集中出现在错误处理惯用写法上，不是真实缺陷；
+    # 为消警而改成复用外层 err，反而扩大变量作用域、增加误用风险。
+    disable:
       - shadow
   staticcheck:
     checks: ["all"]
