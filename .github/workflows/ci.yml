@@ -233,15 +233,34 @@ jobs:
 
       # compose 依赖 .env 提供端口与凭证。缺失时变量会退化为默认值，
       # 容易与 e2e 脚本的预期不一致，因此显式生成。
+      #
+      # 令牌必须运行时随机生成，不能在本文件里写死。原因有两条，
+      # 都是实测踩过的：
+      #  1. 硬编码值曾写作 ci-admin-token-for-e2e-32chars —— 名字自称 32
+      #     实际只有 30 字符，网关按 MinTokenLen=32 直接 fatal 退出，
+      #     健康检查轮询 60s 全部失败。字面量长度靠肉眼数是不可靠的。
+      #  2. 即使补足到 32 字符也起不来：该值含子串 admin-token，
+      #     命中 internal/admin/token.go 的 weakContains 黑名单。
+      #     任何写在仓库里的固定令牌都是「公开可知」的，与本项目
+      #     拒绝占位凭证的设计直接冲突。
+      #
+      # 用 hex 而非 base64：base64 会产出 / 与 + ，前者破坏 sed 替换语法。
+      # hex 字母表为 [0-9a-f]，不可能命中任何黑名单标记（那些标记都含
+      # hex 之外的字母），也不可能触发单字符重复检查。
+      # rand -hex 24 → 48 字符，稳超 32 下限。
       - name: 准备环境变量
         run: |
           cp .env.example .env
-          sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN=ci-admin-token-for-e2e-32chars/' .env
-          grep -E '^(ADMIN_TOKEN|PROXY_PORT|OBS_PORT|ADMIN_PORT)=' .env
+          token="$(openssl rand -hex 24)"
+          echo "::add-mask::${token}"
+          sed -i "s|^ADMIN_TOKEN=.*|ADMIN_TOKEN=${token}|" .env
+          echo "ADMIN_TOKEN=${token}" >> "$GITHUB_ENV"
+          # 只断言长度，不回显令牌本身
+          printf 'ADMIN_TOKEN 长度 %d 字符\n' "${#token}"
+          [ "${#token}" -ge 32 ] || { echo "生成的令牌长度不足"; exit 1; }
+          grep -E '^(PROXY_PORT|OBS_PORT|ADMIN_PORT)=' .env
 
       - name: 启动完整栈
-        env:
-          ADMIN_TOKEN: ci-admin-token-for-e2e-32chars
         run: |
           docker compose up -d --build
           echo "等待网关就绪..."
@@ -249,15 +268,26 @@ jobs:
             if curl -fsS http://127.0.0.1:29091/ready >/dev/null 2>&1; then
               echo "网关就绪（耗时 ${i}s）"; break
             fi
+            # 崩溃重启循环要立刻失败，不能干等 60s。
+            # compose 的 restart 策略会不断拉起 fatal 退出的进程，
+            # up -d 本身返回 0，只靠轮询超时会白等一分钟且日志被刷屏，
+            # 真正的 fatal 行淹没在反复的启动日志里。
+            # 注意：单服务 logs 不带 "unirate-gateway |" 前缀，
+            # 只能直接匹配 fatal: 本身。
+            if docker compose logs gateway 2>/dev/null | grep -q 'fatal:'; then
+              echo "网关启动即 fatal，终止等待："
+              docker compose logs gateway 2>/dev/null | grep 'fatal:' | tail -3
+              exit 1
+            fi
             if [ "$i" = "60" ]; then
               echo "网关启动超时"; docker compose logs --tail=200; exit 1
             fi
             sleep 1
           done
 
+      # ADMIN_TOKEN 由「准备环境变量」写入 GITHUB_ENV，本 step 自动继承，
+      # 无需重复声明 —— 重复声明正是上一版两处字面量不同步的隐患来源。
       - name: 执行验收脚本
-        env:
-          ADMIN_TOKEN: ci-admin-token-for-e2e-32chars
         run: |
           chmod +x test/e2e/run.sh
           ./test/e2e/run.sh
