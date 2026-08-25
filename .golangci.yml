@@ -1,0 +1,43 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - bodyclose      # HTTP 响应体未关闭 = 连接泄漏，网关场景必查
+    - noctx          # 缺少 context 的外部调用无法超时控制
+    - nilerr
+    - rowserrcheck
+    - sqlclosecheck
+    - errorlint
+    - misspell
+    - unconvert
+    - copyloopvar
+
+linters-settings:
+  errcheck:
+    # 这些场景的错误确实可忽略：响应已发出后的写入失败无从处理
+    exclude-functions:
+      - (net/http.ResponseWriter).Write
+      - (*strings.Builder).WriteString
+      - (*strings.Builder).Write
+      - (*strings.Builder).WriteByte
+  govet:
+    enable:
+      - shadow
+  staticcheck:
+    checks: ["all"]
+
+issues:
+  exclude-rules:
+    # 测试代码允许更宽松的错误处理
+    - path: _test\.go
+      linters: [errcheck, bodyclose, noctx]
+  max-issues-per-linter: 0
+  max-same-issues: 0

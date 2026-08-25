@@ -1,0 +1,192 @@
+name: Release
+
+# 仅由语义化 tag 触发。CI 负责"这次改动对不对"，
+# 本工作流负责"这个版本对外发什么"，两者刻意分开：
+# 发布链路失败不应该让日常 PR 变红，反之亦然。
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "手动发布的版本号（如 v1.2.3）"
+        required: true
+        type: string
+
+env:
+  GO_VERSION: "1.22"
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 复用 CI 的质量门禁。不加这一步的话，
+  # 直接对未过测的 commit 打 tag 就能发出去。
+  verify:
+    name: 发布前校验
+    uses: ./.github/workflows/ci.yml
+
+  binaries:
+    name: 构建多平台二进制
+    needs: [verify]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.tag }}"
+          else
+            v="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+
+      # CGO_ENABLED=0 保证产物静态链接，可直接塞进 scratch/alpine 镜像
+      - name: 交叉编译
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          out="dist/unirate-gateway_${VERSION}_${GOOS}_${GOARCH}"
+          mkdir -p "$out"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA}" \
+            -o "${out}/gateway" ./cmd/gateway
+          cp README.md .env.example "${out}/"
+          tar -czf "${out}.tar.gz" -C dist "$(basename "$out")"
+          ls -lh "${out}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  packages:
+    name: 发布镜像到 GHCR
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          # latest 只在非预发布 tag 上移动，避免 v1.0.0-rc1 顶掉稳定版
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 输出镜像摘要
+        run: |
+          echo "### 镜像已发布" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: ${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: 创建 GitHub Release
+    needs: [binaries, packages]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+
+      - name: 生成校验和
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: 汇总变更记录
+        id: notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "## 镜像"
+            echo '```'
+            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${GITHUB_REF_NAME#v}"
+            echo "digest: ${{ needs.packages.outputs.digest }}"
+            echo '```'
+            echo
+            echo "## 变更"
+            if [ -n "$prev" ]; then
+              git log --no-merges --pretty='- %s (%h)' "${prev}..${GITHUB_REF_NAME}"
+            else
+              echo "- 首个发布版本"
+            fi
+          } > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

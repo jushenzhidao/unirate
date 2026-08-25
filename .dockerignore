@@ -1,0 +1,21 @@
+.git
+.github
+.workbuddy
+docs
+test
+deploy/grafana
+deploy/prometheus
+*.md
+.env
+.env.*
+!.env.example
+coverage.out
+*.log
+# 本地编译产物：用 / 锚定，避免连带排除 cmd/gateway 源码目录
+/gateway
+/mockupstream
+/bin
+/dist
+.DS_Store
+.idea
+.vscode

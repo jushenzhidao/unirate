@@ -1,0 +1,23 @@
+# 覆盖率与测试产物
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# 本地环境配置：含 ADMIN_TOKEN 与数据库密码，绝不入库
+# 需要新环境时从 .env.example 复制
+.env
+.env.local
+
+# 编译产物
+# 必须用 / 锚定到仓库根，否则会连带忽略 cmd/gateway、cmd/mockupstream 源码目录
+/bin/
+/dist/
+/gateway
+/mockupstream
+
+# 编辑器与系统
+.DS_Store
+*.swp
+.idea/
+.vscode/
