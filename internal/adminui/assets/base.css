@@ -1,0 +1,145 @@
+/* 组件插槽 + 全局重置。内容逐字取自 docs/design/design-tokens.css 的 B 层与重置段，
+   仅按项目单文件 ≤300 行规范从 tokens.css 中拆出，未改任何值。 */
+
+/* ---------------------------------------------------------------------------
+   B · component — 组件插槽
+   --------------------------------------------------------------------------- */
+:root {
+  /* 按钮 */
+  --btn-h: 30px;              /* 密集工具栏 */
+  --btn-h-lg: 36px;           /* 表单主操作 */
+  --btn-pad-x: var(--sp-3);
+  --btn-radius: var(--r-md);
+  --btn-primary-bg: var(--c-accent);
+  --btn-primary-fg: var(--c-accent-on);
+  --btn-primary-bg-hover: var(--c-accent-hover);
+  --btn-secondary-bg: var(--c-surface);
+  --btn-secondary-fg: var(--c-fg);
+  --btn-secondary-border: var(--c-border-field);
+  --btn-secondary-bg-hover: var(--c-surface-2);
+  --btn-ghost-fg: var(--c-fg-2);
+  --btn-ghost-bg-hover: var(--c-surface-2);
+  --btn-danger-fg: var(--c-danger);
+  --btn-danger-border: var(--c-danger);
+  --btn-danger-bg-hover: var(--c-danger-soft);
+
+  /* 输入 */
+  --field-h: 30px;
+  --field-h-lg: 36px;
+  --field-bg: var(--c-surface);
+  --field-fg: var(--c-fg);
+  --field-border: var(--c-border-field);        /* ≥3:1，控件边界不可用装饰性 --c-border */
+  --field-border-hover: var(--c-fg-2);
+  --field-border-focus: var(--c-accent);
+  --field-border-error: var(--c-danger);
+  --field-placeholder: var(--c-meta);
+  --field-bg-disabled: var(--c-surface-2);
+  --field-radius: var(--r-md);
+  --field-pad-x: var(--sp-3);
+
+  /* 表格 */
+  --table-header-bg: var(--c-surface-2);
+  --table-header-fg: var(--c-muted);
+  --table-row-h: var(--row-h);
+  --table-row-bg-hover: var(--c-surface-3);
+  --table-row-bg-selected: var(--c-accent-soft);
+  --table-divider: var(--c-border-soft);
+  --table-num-font: var(--font-mono);
+
+  /* 面板 / 卡片 */
+  --panel-bg: var(--c-surface);
+  --panel-border: var(--c-border);
+  --panel-radius: var(--r-lg);
+  --panel-pad: var(--sp-4);
+  --panel-header-h: 36px;
+
+  /* 徽章 / 状态点 */
+  --badge-h: 18px;
+  --badge-radius: var(--r-sm);
+  --badge-fs: var(--fs-micro);
+  --dot-size: 8px;
+
+  /* 侧栏 */
+  --nav-item-h: 30px;
+  --nav-item-fg: var(--c-fg-2);
+  --nav-item-fg-active: var(--c-fg);
+  --nav-item-bg-active: var(--c-surface-3);
+  --nav-item-marker: var(--c-accent);
+
+  /* 图标：三档尺寸，stroke 恒定 1.5 */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --icon-stroke: 1.5;
+}
+
+/* ---------------------------------------------------------------------------
+   基础重置与全局排版契约
+   --------------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 数字必须等宽对齐：表格列、KPI、ID、时间戳 */
+.num, td.num, .kpi-value, time, code, kbd, .mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ALL CAPS 一律带字距，否则字母粘连 */
+.caps {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-emph);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+
+/* 焦点可见：不使用 outline:none，统一双环 */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-focus);
+  border-radius: var(--r-sm);
+}
+
+/* 尊重系统减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 图标基类：sprite 中 symbol 已设 stroke 属性，这里只管尺寸与色继承 */
+.icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+  color: currentColor;
+  vertical-align: -0.15em;
+}
+.icon--md { width: var(--icon-md); height: var(--icon-md); }
+.icon--lg { width: var(--icon-lg); height: var(--icon-lg); }
+
+/* 图表 stroke 不随 viewBox 缩放而变粗 —— 拉伸型 sparkline 的必备属性 */
+.spark path, .spark polyline, .chart-line path {
+  vector-effect: non-scaling-stroke;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

@@ -1,0 +1,466 @@
+{
+  "meta": {
+    "scenario": "A",
+    "label": "before-opt",
+    "concurrency_levels": [
+      64,
+      256,
+      512
+    ],
+    "rounds": 5,
+    "duration_per_round": "15s",
+    "warmup": "30s",
+    "started_at": "2026-08-23T13:10:41.339091296Z",
+    "client_runtime": "GOMAXPROCS=5 NumCPU=5 GOOS=linux GOARCH=arm64"
+  },
+  "environment_declaration": {
+    "host": "Docker Desktop 5 核 / 8GB（开发机，非专用压测环境）",
+    "client_colocated_with_target": true,
+    "caveats": [
+      "压测客户端与被测服务运行在同一宿主，争抢同一批 CPU",
+      "宿主同时运行多个无关容器，存在邻居噪声",
+      "绝对数字不可作生产容量参考；仅用于优化前后同环境对比",
+      "归因结论必须依据 container_cpu 字段，缺失时结论不成立"
+    ]
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "concurrency": 64,
+      "qps": 9463.13926559469,
+      "latency": {
+        "max_ms": 38.75,
+        "mean_ms": 6.76,
+        "n": 142010,
+        "p50_ms": 6.07,
+        "p90_ms": 10.96,
+        "p999_ms": 25.41,
+        "p99_ms": 17.84
+      },
+      "status_codes": {
+        "200": 142010
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.64,
+      "redis_evalsha_calls": 568040,
+      "redis_cpu_seconds_consumed": 12.288,
+      "redis_cores_used": 0.819
+    },
+    {
+      "round": 2,
+      "concurrency": 64,
+      "qps": 9813.23189175537,
+      "latency": {
+        "max_ms": 35.76,
+        "mean_ms": 6.52,
+        "n": 147238,
+        "p50_ms": 5.92,
+        "p90_ms": 10.37,
+        "p999_ms": 23.92,
+        "p99_ms": 16.65
+      },
+      "status_codes": {
+        "200": 147238
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.34,
+      "redis_evalsha_calls": 588952,
+      "redis_cpu_seconds_consumed": 12.352,
+      "redis_cores_used": 0.823
+    },
+    {
+      "round": 3,
+      "concurrency": 64,
+      "qps": 9719.813697709324,
+      "latency": {
+        "max_ms": 38.33,
+        "mean_ms": 6.58,
+        "n": 145838,
+        "p50_ms": 5.92,
+        "p90_ms": 10.56,
+        "p999_ms": 23.94,
+        "p99_ms": 17.2
+      },
+      "status_codes": {
+        "200": 145838
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.46,
+      "redis_evalsha_calls": 583352,
+      "redis_cpu_seconds_consumed": 12.384,
+      "redis_cores_used": 0.825
+    },
+    {
+      "round": 4,
+      "concurrency": 64,
+      "qps": 9548.387686383083,
+      "latency": {
+        "max_ms": 178.32,
+        "mean_ms": 6.7,
+        "n": 143255,
+        "p50_ms": 5.94,
+        "p90_ms": 10.65,
+        "p999_ms": 37.37,
+        "p99_ms": 17.8
+      },
+      "status_codes": {
+        "200": 143255
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.51,
+      "redis_evalsha_calls": 573020,
+      "redis_cpu_seconds_consumed": 12.21,
+      "redis_cores_used": 0.814
+    },
+    {
+      "round": 5,
+      "concurrency": 64,
+      "qps": 9355.783732859532,
+      "latency": {
+        "max_ms": 95.12,
+        "mean_ms": 6.84,
+        "n": 140365,
+        "p50_ms": 5.99,
+        "p90_ms": 10.85,
+        "p999_ms": 75.34,
+        "p99_ms": 18.71
+      },
+      "status_codes": {
+        "200": 140365
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.65,
+      "redis_evalsha_calls": 561460,
+      "redis_cpu_seconds_consumed": 12.181,
+      "redis_cores_used": 0.812
+    },
+    {
+      "round": 1,
+      "concurrency": 256,
+      "qps": 6708.702560017937,
+      "latency": {
+        "max_ms": 283.62,
+        "mean_ms": 38.12,
+        "n": 100748,
+        "p50_ms": 33.37,
+        "p90_ms": 66.09,
+        "p999_ms": 177.25,
+        "p99_ms": 109.72
+      },
+      "status_codes": {
+        "200": 100748
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 12.7,
+      "redis_evalsha_calls": 402992,
+      "redis_cpu_seconds_consumed": 9.354,
+      "redis_cores_used": 0.623
+    },
+    {
+      "round": 2,
+      "concurrency": 256,
+      "qps": 8597.429182744409,
+      "latency": {
+        "max_ms": 157.38,
+        "mean_ms": 29.76,
+        "n": 129121,
+        "p50_ms": 27.32,
+        "p90_ms": 48.05,
+        "p999_ms": 111.03,
+        "p99_ms": 76.02
+      },
+      "status_codes": {
+        "200": 129121
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.88,
+      "redis_evalsha_calls": 516484,
+      "redis_cpu_seconds_consumed": 11.256,
+      "redis_cores_used": 0.749
+    },
+    {
+      "round": 3,
+      "concurrency": 256,
+      "qps": 6608.992867059312,
+      "latency": {
+        "max_ms": 159.8,
+        "mean_ms": 38.71,
+        "n": 99276,
+        "p50_ms": 35.85,
+        "p90_ms": 64.4,
+        "p999_ms": 123.54,
+        "p99_ms": 95.41
+      },
+      "status_codes": {
+        "200": 99276
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 13.14,
+      "redis_evalsha_calls": 397104,
+      "redis_cpu_seconds_consumed": 9.317,
+      "redis_cores_used": 0.62
+    },
+    {
+      "round": 4,
+      "concurrency": 256,
+      "qps": 7207.476266115424,
+      "latency": {
+        "max_ms": 199.98,
+        "mean_ms": 35.49,
+        "n": 108284,
+        "p50_ms": 32.31,
+        "p90_ms": 59.24,
+        "p999_ms": 122.21,
+        "p99_ms": 91.94
+      },
+      "status_codes": {
+        "200": 108284
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 12.77,
+      "redis_evalsha_calls": 433331,
+      "redis_cpu_seconds_consumed": 9.878,
+      "redis_cores_used": 0.657
+    },
+    {
+      "round": 5,
+      "concurrency": 256,
+      "qps": 9335.19051871277,
+      "latency": {
+        "max_ms": 148.29,
+        "mean_ms": 27.41,
+        "n": 140154,
+        "p50_ms": 25.47,
+        "p90_ms": 43.68,
+        "p999_ms": 94.94,
+        "p99_ms": 66
+      },
+      "status_codes": {
+        "200": 140154
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.45,
+      "redis_evalsha_calls": 561162,
+      "redis_cpu_seconds_consumed": 11.803,
+      "redis_cores_used": 0.786
+    },
+    {
+      "round": 1,
+      "concurrency": 512,
+      "qps": 9296.483101943166,
+      "latency": {
+        "max_ms": 143.48,
+        "mean_ms": 55.01,
+        "n": 139691,
+        "p50_ms": 53.1,
+        "p90_ms": 73.55,
+        "p999_ms": 115.93,
+        "p99_ms": 96.29
+      },
+      "status_codes": {
+        "200": 139691
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.53,
+      "redis_evalsha_calls": 558764,
+      "redis_cpu_seconds_consumed": 12.087,
+      "redis_cores_used": 0.804
+    },
+    {
+      "round": 2,
+      "concurrency": 512,
+      "qps": 9377.241243324213,
+      "latency": {
+        "max_ms": 130.1,
+        "mean_ms": 54.56,
+        "n": 140899,
+        "p50_ms": 52.88,
+        "p90_ms": 72.01,
+        "p999_ms": 108.66,
+        "p99_ms": 92.27
+      },
+      "status_codes": {
+        "200": 140899
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.44,
+      "redis_evalsha_calls": 563596,
+      "redis_cpu_seconds_consumed": 12.048,
+      "redis_cores_used": 0.802
+    },
+    {
+      "round": 3,
+      "concurrency": 512,
+      "qps": 8841.269439096626,
+      "latency": {
+        "max_ms": 180.63,
+        "mean_ms": 57.84,
+        "n": 132951,
+        "p50_ms": 55.38,
+        "p90_ms": 78.32,
+        "p999_ms": 137.71,
+        "p99_ms": 107.27
+      },
+      "status_codes": {
+        "200": 132951
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 11.89,
+      "redis_evalsha_calls": 531804,
+      "redis_cpu_seconds_consumed": 11.843,
+      "redis_cores_used": 0.788
+    },
+    {
+      "round": 4,
+      "concurrency": 512,
+      "qps": 5313.0482001776045,
+      "latency": {
+        "max_ms": 390.55,
+        "mean_ms": 96.27,
+        "n": 79878,
+        "p50_ms": 90.25,
+        "p90_ms": 140.13,
+        "p999_ms": 336.98,
+        "p99_ms": 220.73
+      },
+      "status_codes": {
+        "200": 79878
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 16.65,
+      "redis_evalsha_calls": 319512,
+      "redis_cpu_seconds_consumed": 9.018,
+      "redis_cores_used": 0.6
+    },
+    {
+      "round": 5,
+      "concurrency": 512,
+      "qps": 6348.894208331822,
+      "latency": {
+        "max_ms": 254.14,
+        "mean_ms": 80.49,
+        "n": 95555,
+        "p50_ms": 76.84,
+        "p90_ms": 114.77,
+        "p999_ms": 195.15,
+        "p99_ms": 155.69
+      },
+      "status_codes": {
+        "200": 95555
+      },
+      "transport_errors": 0,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 13.31,
+      "redis_evalsha_calls": 382220,
+      "redis_cpu_seconds_consumed": 9.033,
+      "redis_cores_used": 0.6
+    }
+  ],
+  "median": [
+    {
+      "concurrency": 64,
+      "qps_median": 9548.39,
+      "qps_spread_percent": 2.8,
+      "p50_median": "5.94ms",
+      "p99_median": "17.8ms",
+      "redis_cores_median": 0.819
+    },
+    {
+      "concurrency": 256,
+      "qps_median": 7207.48,
+      "qps_spread_percent": 29.5,
+      "p50_median": "32.31ms",
+      "p99_median": "91.94ms",
+      "redis_cores_median": 0.657
+    },
+    {
+      "concurrency": 512,
+      "qps_median": 8841.27,
+      "qps_spread_percent": 39.9,
+      "p50_median": "55.38ms",
+      "p99_median": "107.27ms",
+      "redis_cores_median": 0.788
+    }
+  ],
+  "container_cpu": {
+    "available": true,
+    "redis_cpu_percent": 73.07,
+    "gateway_cpu_percent": 153.64,
+    "samples": 120
+  },
+  "bottleneck_attribution": "两侧均未饱和（Redis 73.1%，gateway 153.6%）→ 瓶颈可能在压测客户端或网络；须加客户端资源重测，本轮数据不可用于容量结论",
+  "verdict": {
+    "pass": false,
+    "checks": [
+      {
+        "name": "redis_breaker_open 恒为 0",
+        "pass": true,
+        "detail": "全轮次均为 0"
+      },
+      {
+        "name": "传输层无错误",
+        "pass": true,
+        "detail": "累计传输错误 0"
+      },
+      {
+        "name": "吞吐场景以成功路径为主（200 占比 ≥ 95%）",
+        "pass": true,
+        "detail": "200 占比 100.00%（200=1885263, 429=0）"
+      },
+      {
+        "name": "多轮离散度 ≤ 20%",
+        "pass": false,
+        "detail": "以下并发档波动过大，建议重测：conc=256(29.5%) conc=512(39.9%) "
+      },
+      {
+        "name": "双侧 CPU 归因数据具备",
+        "pass": true,
+        "detail": "两侧均未饱和（Redis 73.1%，gateway 153.6%）→ 瓶颈可能在压测客户端或网络；须加客户端资源重测，本轮数据不可用于容量结论"
+      }
+    ]
+  }
+}

@@ -1,0 +1,232 @@
+/* ============================================================================
+   骨架布局：topbar / sidebar / content / 响应式
+   对应 DESIGN.md §4。所有色值与尺度走 var()，本文件不出现裸 hex。
+   ========================================================================== */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  grid-template-areas: "brand topbar" "side content";
+  min-height: 100dvh;
+}
+.app[hidden] { display: none; }
+
+/* ---- topbar ------------------------------------------------------------- */
+.brand {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border-right: 1px solid var(--c-border);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  font-weight: var(--fw-anno);
+  letter-spacing: var(--ls-title);
+  color: var(--c-fg);
+}
+.brand .icon { color: var(--c-accent); }
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+}
+.topbar-crumb { color: var(--c-muted); font-size: var(--fs-cap); }
+.topbar-spacer { flex: 1 1 auto; }
+
+/* 健康胶囊：任何页面常驻，SRE 改规则时必须同时看到集群是否降级 */
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 26px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--c-border-field);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  font-size: var(--fs-cap);
+  color: var(--c-fg-2);
+  white-space: nowrap;
+}
+.health[data-state="healthy"]  { color: var(--c-ok); border-color: var(--c-ok); }
+.health[data-state="warning"]  { color: var(--c-warn); border-color: var(--c-warn); }
+.health[data-state="degraded"] { color: var(--c-degraded); border-color: var(--c-degraded); }
+.health[data-state="failed"]   { color: var(--c-danger); border-color: var(--c-danger); }
+.health[data-state="unknown"]  { color: var(--c-muted); }
+.health .health-ver { color: var(--c-muted); font-size: var(--fs-micro); }
+
+/* ---- sidebar ------------------------------------------------------------ */
+.side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-2);
+  border-right: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: var(--sp-1); }
+.side-sep { height: 1px; background: var(--c-border); margin: var(--sp-2) var(--sp-2); }
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--nav-item-h);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-md);
+  color: var(--nav-item-fg);
+  font-size: var(--fs-body);
+  text-decoration: none;
+  transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+}
+.nav-item:hover { background: var(--c-surface-2); color: var(--c-fg); }
+.nav-item[aria-current="page"] {
+  background: var(--nav-item-bg-active);
+  color: var(--nav-item-fg-active);
+  font-weight: var(--fw-emph);
+}
+/* 选中标记：2px 竖条，是全屏仅两处强调色之一（另一处是主操作按钮） */
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: var(--r-pill);
+  background: var(--nav-item-marker);
+}
+.nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- content ------------------------------------------------------------ */
+.content {
+  grid-area: content;
+  min-width: 0;
+  padding: var(--gutter);
+}
+.page { max-width: var(--content-max); margin: 0 auto; }
+
+.page-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.page-title {
+  margin: 0;
+  font-size: var(--fs-sec);
+  font-weight: var(--fw-anno);
+  letter-spacing: var(--ls-title);
+}
+.page-sub { color: var(--c-muted); font-size: var(--fs-cap); }
+.page-head-actions { margin-left: auto; display: flex; gap: var(--sp-2); align-items: center; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--panel-radius);
+  background: var(--c-surface);
+}
+.toolbar-note {
+  width: 100%;
+  color: var(--c-muted);
+  font-size: var(--fs-cap);
+}
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.grid-kpi { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+.row { display: flex; align-items: center; gap: var(--sp-2); }
+.row-wrap { flex-wrap: wrap; }
+.spacer { flex: 1 1 auto; }
+
+/* ---- 登录页：单面板居中偏上，不做 Hero，不垂直居中 --------------------- */
+.auth-wrap { min-height: 100dvh; padding: 12vh var(--sp-4) var(--sp-8); }
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  padding: var(--sp-6);
+  border: 1px solid var(--c-border);
+  border-radius: var(--panel-radius);
+  background: var(--c-surface);
+}
+.auth-card h1 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-title);
+  font-weight: var(--fw-anno);
+  letter-spacing: var(--ls-title);
+}
+.auth-card .icon--lg { color: var(--c-accent); }
+.auth-lede { margin: 0 0 var(--sp-5); color: var(--c-muted); font-size: var(--fs-cap); }
+.auth-foot {
+  max-width: 380px;
+  margin: var(--sp-4) auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: center;
+  color: var(--c-meta);
+  font-size: var(--fs-cap);
+}
+.auth-foot a { color: var(--c-fg-2); }
+.auth-note {
+  max-width: 380px;
+  margin: var(--sp-2) auto 0;
+  color: var(--c-muted);
+  font-size: var(--fs-cap);
+  line-height: var(--lh-body);
+}
+
+/* ---- 响应式（DESIGN.md §4.1）------------------------------------------- */
+@media (max-width: 1599px) {
+  .grid-kpi { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 1199px) {
+  .app { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }
+  .grid-kpi { grid-template-columns: repeat(2, 1fr); }
+  .brand { padding: 0; justify-content: center; }
+  .brand-name { display: none; }
+  .nav-item { justify-content: center; padding: 0; }
+  .nav-label { display: none; }
+}
+@media (max-width: 899px) {
+  /* 侧栏转抽屉：由 i-menu 触发，未展开时移出视口而非 display:none，
+     保留焦点顺序与过渡 */
+  .app { grid-template-columns: 1fr; grid-template-areas: "topbar" "content"; }
+  .brand { display: none; }
+  .side {
+    position: fixed;
+    inset: var(--topbar-h) auto 0 0;
+    width: var(--sidebar-w);
+    z-index: var(--z-drawer);
+    box-shadow: var(--sh-lg);
+    transform: translateX(-100%);
+    transition: transform var(--dur-3) var(--ease-out);
+  }
+  .app[data-nav="open"] .side { transform: translateX(0); }
+  .nav-item { justify-content: flex-start; padding: 0 var(--sp-3); height: var(--tap-min); }
+  .nav-label { display: inline; }
+  .content { padding: var(--sp-4); }
+  .grid-kpi { grid-template-columns: 1fr; }
+  .btn, .field { min-height: var(--tap-min); }
+  #nav-toggle { display: inline-flex; }
+}
+#nav-toggle { display: none; }

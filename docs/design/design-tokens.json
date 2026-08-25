@@ -1,0 +1,342 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$meta": {
+    "project": "unirate 管理控制台",
+    "version": "1.0.0",
+    "author": "颜好看 (UI/UX)",
+    "register": "product",
+    "scales": { "variance": 3, "motion": 2, "density": 8 },
+    "constraints": [
+      "单文件原生 HTML/CSS/JS，零构建、零 npm、零 CDN",
+      "图标仅内联 SVG sprite（symbol + use），stroke-width 恒定 1.5",
+      "颜色只允许通过 CSS 自定义属性引用，例外仅 #fff / #000",
+      "禁止弹跳缓动，禁止 Indigo→Pink 渐变，禁止 emoji 作功能图标"
+    ],
+    "themeStrategy": "prefers-color-scheme 自动 + html[data-theme] 手动覆盖，light/dark 语义值一一对齐"
+  },
+
+  "primitive": {
+    "neutral": {
+      "0":   { "value": "#ffffff", "type": "color" },
+      "25":  { "value": "#fbfcfc", "type": "color" },
+      "50":  { "value": "#f7f8f9", "type": "color" },
+      "100": { "value": "#f1f3f5", "type": "color" },
+      "150": { "value": "#eaecef", "type": "color" },
+      "200": { "value": "#d8dce1", "type": "color" },
+      "300": { "value": "#b9c0c8", "type": "color" },
+      "400": { "value": "#8b939c", "type": "color" },
+      "500": { "value": "#656d76", "type": "color" },
+      "600": { "value": "#4b535c", "type": "color" },
+      "700": { "value": "#3d444d", "type": "color" },
+      "800": { "value": "#262b31", "type": "color" },
+      "850": { "value": "#1d222a", "type": "color" },
+      "900": { "value": "#161a20", "type": "color" },
+      "950": { "value": "#0e1116", "type": "color" }
+    },
+    "blue": {
+      "50":  { "value": "#e8f0fe", "type": "color" },
+      "100": { "value": "#cfe0fb", "type": "color" },
+      "300": { "value": "#6ba1ff", "type": "color" },
+      "400": { "value": "#4c8dff", "type": "color" },
+      "600": { "value": "#1957c8", "type": "color", "$description": "light 主强调色，刻意避开 #6366f1 与 #0070f3" },
+      "700": { "value": "#14499f", "type": "color" },
+      "800": { "value": "#103b80", "type": "color" }
+    },
+    "green":  { "500": { "value": "#3fbf7f", "type": "color" }, "700": { "value": "#12724a", "type": "color" }, "50": { "value": "#e3f4ea", "type": "color" } },
+    "amber":  { "500": { "value": "#e0a32e", "type": "color" }, "700": { "value": "#8a5a0b", "type": "color" }, "50": { "value": "#fbf0dc", "type": "color" } },
+    "red":    { "500": { "value": "#f0666e", "type": "color" }, "700": { "value": "#b01d26", "type": "color" }, "50": { "value": "#fbe9e9", "type": "color" } },
+    "teal":   { "500": { "value": "#46c2d2", "type": "color" }, "700": { "value": "#0d6b78", "type": "color" }, "50": { "value": "#e0f2f4", "type": "color" } }
+  },
+
+  "semantic": {
+    "light": {
+      "bg":            { "value": "{primitive.neutral.50}",  "css": "--c-bg" },
+      "surface":       { "value": "{primitive.neutral.0}",   "css": "--c-surface" },
+      "surface2":      { "value": "{primitive.neutral.100}", "css": "--c-surface-2" },
+      "surface3":      { "value": "{primitive.neutral.150}", "css": "--c-surface-3" },
+      "fg":            { "value": "#16191d",                 "css": "--c-fg" },
+      "fg2":           { "value": "{primitive.neutral.700}", "css": "--c-fg-2" },
+      "muted":         { "value": "{primitive.neutral.500}", "css": "--c-muted" },
+      "meta":          { "value": "{primitive.neutral.400}", "css": "--c-meta" },
+      "disabled":      { "value": "{primitive.neutral.300}", "css": "--c-disabled" },
+      "border":        { "value": "{primitive.neutral.200}", "css": "--c-border", "$description": "装饰性分隔线，1.38:1。不得用于需被识别的控件边界" },
+      "borderSoft":    { "value": "{primitive.neutral.150}", "css": "--c-border-soft" },
+      "borderStrong":  { "value": "{primitive.neutral.300}", "css": "--c-border-strong" },
+      "borderField":   { "value": "{primitive.neutral.400}", "css": "--c-border-field", "$description": "输入框/次级按钮/开关的边界，3.11:1，满足 WCAG 1.4.11" },
+      "accent":        { "value": "{primitive.blue.600}",    "css": "--c-accent" },
+      "accentHover":   { "value": "{primitive.blue.700}",    "css": "--c-accent-hover" },
+      "accentActive":  { "value": "{primitive.blue.800}",    "css": "--c-accent-active" },
+      "accentOn":      { "value": "#ffffff",                 "css": "--c-accent-on" },
+      "accentSoft":    { "value": "{primitive.blue.50}",     "css": "--c-accent-soft" },
+      "accentLine":    { "value": "{primitive.blue.100}",    "css": "--c-accent-line" },
+      "ok":            { "value": "{primitive.green.700}",   "css": "--c-ok" },
+      "okSoft":        { "value": "{primitive.green.50}",    "css": "--c-ok-soft" },
+      "warn":          { "value": "{primitive.amber.700}",   "css": "--c-warn" },
+      "warnSoft":      { "value": "{primitive.amber.50}",    "css": "--c-warn-soft" },
+      "danger":        { "value": "{primitive.red.700}",     "css": "--c-danger" },
+      "dangerSoft":    { "value": "{primitive.red.50}",      "css": "--c-danger-soft" },
+      "degraded":      { "value": "{primitive.teal.700}",    "css": "--c-degraded" },
+      "degradedSoft":  { "value": "{primitive.teal.50}",     "css": "--c-degraded-soft" }
+    },
+    "dark": {
+      "bg":            { "value": "{primitive.neutral.950}", "css": "--c-bg" },
+      "surface":       { "value": "{primitive.neutral.900}", "css": "--c-surface" },
+      "surface2":      { "value": "{primitive.neutral.850}", "css": "--c-surface-2" },
+      "surface3":      { "value": "{primitive.neutral.800}", "css": "--c-surface-3" },
+      "fg":            { "value": "#e8ebef",                 "css": "--c-fg" },
+      "fg2":           { "value": "#c0c6ce",                 "css": "--c-fg-2" },
+      "muted":         { "value": "#8e97a2",                 "css": "--c-muted" },
+      "meta":          { "value": "#6a737e",                 "css": "--c-meta" },
+      "disabled":      { "value": "#4b535c",                 "css": "--c-disabled" },
+      "border":        { "value": "#2a3038",                 "css": "--c-border", "$description": "装饰性分隔线，1.31:1" },
+      "borderSoft":    { "value": "rgba(255,255,255,0.06)",  "css": "--c-border-soft" },
+      "borderStrong":  { "value": "#3d444d",                 "css": "--c-border-strong" },
+      "borderField":   { "value": "#6a737e",                 "css": "--c-border-field", "$description": "控件边界，3.63:1，满足 WCAG 1.4.11" },
+      "accent":        { "value": "{primitive.blue.400}",    "css": "--c-accent" },
+      "accentHover":   { "value": "{primitive.blue.300}",    "css": "--c-accent-hover" },
+      "accentActive":  { "value": "{primitive.blue.300}",    "css": "--c-accent-active" },
+      "accentOn":      { "value": "#08101f",                 "css": "--c-accent-on" },
+      "accentSoft":    { "value": "rgba(76,141,255,0.14)",   "css": "--c-accent-soft" },
+      "accentLine":    { "value": "rgba(76,141,255,0.32)",   "css": "--c-accent-line" },
+      "ok":            { "value": "{primitive.green.500}",   "css": "--c-ok" },
+      "okSoft":        { "value": "rgba(63,191,127,0.14)",   "css": "--c-ok-soft" },
+      "warn":          { "value": "{primitive.amber.500}",   "css": "--c-warn" },
+      "warnSoft":      { "value": "rgba(224,163,46,0.14)",   "css": "--c-warn-soft" },
+      "danger":        { "value": "{primitive.red.500}",      "css": "--c-danger" },
+      "dangerSoft":    { "value": "rgba(240,102,110,0.14)",  "css": "--c-danger-soft" },
+      "degraded":      { "value": "{primitive.teal.500}",     "css": "--c-degraded" },
+      "degradedSoft":  { "value": "rgba(70,194,210,0.14)",   "css": "--c-degraded-soft" }
+    },
+    "statusMapping": {
+      "$description": "运行状态 → 语义色的唯一映射表。前端所有状态渲染必须查此表，不得自行配色。颜色永不单独承载语义，必须同时带文字标签或形状差异（色盲可达）。",
+      "healthy":   { "color": "ok",       "label": "正常",   "icon": "i-status-ok",       "dotShape": "circle" },
+      "warning":   { "color": "warn",     "label": "接近上限", "icon": "i-status-warn",     "dotShape": "triangle" },
+      "degraded":  { "color": "degraded", "label": "降级",   "icon": "i-status-degraded", "dotShape": "diamond" },
+      "failed":    { "color": "danger",   "label": "故障",   "icon": "i-status-fail",     "dotShape": "square" },
+      "disabled":  { "color": "disabled", "label": "已停用", "icon": "i-status-off",      "dotShape": "ring" }
+    }
+  },
+
+  "chart": {
+    "$description": "手绘 SVG 图表专用。系列 1-3 固定语义（通过/拒绝/降级），4-5 供多 biz 对比。",
+    "light": {
+      "series1":    { "value": "{primitive.blue.600}",        "css": "--c-chart-1", "role": "allowed" },
+      "series2":    { "value": "{primitive.red.700}",         "css": "--c-chart-2", "role": "rejected" },
+      "series3":    { "value": "{primitive.teal.700}",        "css": "--c-chart-3", "role": "degraded" },
+      "series4":    { "value": "{primitive.amber.700}",       "css": "--c-chart-4", "role": "latency" },
+      "series5":    { "value": "{primitive.neutral.500}",     "css": "--c-chart-5", "role": "baseline" },
+      "grid":       { "value": "{primitive.neutral.150}",     "css": "--c-chart-grid" },
+      "area":       { "value": "rgba(25,87,200,0.10)",        "css": "--c-chart-area" },
+      "areaDanger": { "value": "rgba(176,29,38,0.10)",        "css": "--c-chart-area-danger" }
+    },
+    "dark": {
+      "series1":    { "value": "{primitive.blue.400}",   "css": "--c-chart-1" },
+      "series2":    { "value": "{primitive.red.500}",    "css": "--c-chart-2" },
+      "series3":    { "value": "{primitive.teal.500}",   "css": "--c-chart-3" },
+      "series4":    { "value": "{primitive.amber.500}",  "css": "--c-chart-4" },
+      "series5":    { "value": "#8e97a2",                "css": "--c-chart-5" },
+      "grid":       { "value": "#23282f",                "css": "--c-chart-grid" },
+      "area":       { "value": "rgba(76,141,255,0.16)",  "css": "--c-chart-area" },
+      "areaDanger": { "value": "rgba(240,102,110,0.14)", "css": "--c-chart-area-danger" }
+    }
+  },
+
+  "typography": {
+    "family": {
+      "sans": {
+        "value": "ui-sans-serif, -apple-system, \"Segoe UI Variable Text\", \"Segoe UI\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+        "type": "fontFamily",
+        "css": "--font-sans",
+        "$description": "零外链约束下不能加载网络字体。放弃品牌字形，改用受控系统栈 + 显式排版契约保证工艺。"
+      },
+      "mono": {
+        "value": "ui-monospace, \"SF Mono\", SFMono-Regular, \"JetBrains Mono\", \"Cascadia Mono\", \"Cascadia Code\", \"Roboto Mono\", Consolas, \"Liberation Mono\", Menlo, monospace",
+        "type": "fontFamily",
+        "css": "--font-mono",
+        "$description": "所有数字、biz ID、config version、时间戳、path 一律走 mono + tabular-nums，防止表格列宽跳动"
+      }
+    },
+    "size": {
+      "micro": { "value": "11px", "css": "--fs-micro", "use": "表头 ALL CAPS、徽章" },
+      "cap":   { "value": "12px", "css": "--fs-cap",   "use": "元数据、辅助说明" },
+      "body":  { "value": "13px", "css": "--fs-body",  "use": "正文、表格单元、输入框（默认）" },
+      "lg":    { "value": "14px", "css": "--fs-lg",    "use": "强调正文、卡片标题" },
+      "title": { "value": "16px", "css": "--fs-title", "use": "面板标题" },
+      "sec":   { "value": "20px", "css": "--fs-sec",   "use": "页面标题" },
+      "kpi":   { "value": "28px", "css": "--fs-kpi",   "use": "KPI 数字（仅 mono）" }
+    },
+    "weight": {
+      "read": { "value": 400, "css": "--fw-read" },
+      "emph": { "value": 510, "css": "--fw-emph" },
+      "anno": { "value": 590, "css": "--fw-anno" }
+    },
+    "lineHeight": {
+      "tight": { "value": 1.2,  "css": "--lh-tight" },
+      "body":  { "value": 1.55, "css": "--lh-body" },
+      "flat":  { "value": 1,    "css": "--lh-flat" }
+    },
+    "letterSpacing": {
+      "caps":  { "value": "0.08em",  "css": "--ls-caps" },
+      "micro": { "value": "0.01em",  "css": "--ls-micro" },
+      "body":  { "value": "0",       "css": "--ls-body" },
+      "title": { "value": "-0.01em", "css": "--ls-title" },
+      "kpi":   { "value": "-0.02em", "css": "--ls-kpi" }
+    }
+  },
+
+  "space": {
+    "1":  { "value": "4px",  "css": "--sp-1" },
+    "2":  { "value": "8px",  "css": "--sp-2" },
+    "3":  { "value": "12px", "css": "--sp-3" },
+    "4":  { "value": "16px", "css": "--sp-4" },
+    "5":  { "value": "20px", "css": "--sp-5" },
+    "6":  { "value": "24px", "css": "--sp-6" },
+    "8":  { "value": "32px", "css": "--sp-8" },
+    "10": { "value": "40px", "css": "--sp-10" },
+    "12": { "value": "48px", "css": "--sp-12" }
+  },
+
+  "radius": {
+    "sm":   { "value": "4px",    "css": "--r-sm" },
+    "md":   { "value": "6px",    "css": "--r-md" },
+    "lg":   { "value": "8px",    "css": "--r-lg" },
+    "xl":   { "value": "12px",   "css": "--r-xl", "$description": "控制台上限，禁止 ≥16px" },
+    "pill": { "value": "9999px", "css": "--r-pill" }
+  },
+
+  "shadow": {
+    "light": {
+      "ring":        { "value": "0 0 0 1px var(--c-border)",                                    "css": "--sh-ring" },
+      "sm":          { "value": "0 1px 2px rgba(16,24,40,0.06)",                                "css": "--sh-sm" },
+      "md":          { "value": "0 4px 12px rgba(16,24,40,0.10), 0 0 0 1px var(--c-border)",     "css": "--sh-md" },
+      "lg":          { "value": "0 12px 32px rgba(16,24,40,0.14), 0 0 0 1px var(--c-border)",    "css": "--sh-lg" },
+      "focus":       { "value": "0 0 0 2px var(--c-surface), 0 0 0 4px rgba(25,87,200,0.40)",    "css": "--sh-focus" },
+      "focusDanger": { "value": "0 0 0 2px var(--c-surface), 0 0 0 4px rgba(176,29,38,0.35)",    "css": "--sh-focus-danger" }
+    },
+    "dark": {
+      "sm":          { "value": "0 1px 2px rgba(0,0,0,0.40)",                                   "css": "--sh-sm" },
+      "md":          { "value": "0 4px 12px rgba(0,0,0,0.50), 0 0 0 1px var(--c-border)",        "css": "--sh-md" },
+      "lg":          { "value": "0 12px 32px rgba(0,0,0,0.60), 0 0 0 1px var(--c-border)",       "css": "--sh-lg" },
+      "focus":       { "value": "0 0 0 2px var(--c-surface), 0 0 0 4px rgba(76,141,255,0.45)",   "css": "--sh-focus" },
+      "focusDanger": { "value": "0 0 0 2px var(--c-surface), 0 0 0 4px rgba(240,102,110,0.40)",  "css": "--sh-focus-danger" }
+    },
+    "$rule": "禁止 1px border 与 blur≥16px 阴影同时出现在同一元素（幽灵卡片）。卡片默认只用 ring，浮层才用 md/lg。"
+  },
+
+  "zIndex": {
+    "base":     { "value": 0,   "css": "--z-base" },
+    "sticky":   { "value": 100, "css": "--z-sticky" },
+    "dropdown": { "value": 400, "css": "--z-dropdown" },
+    "drawer":   { "value": 600, "css": "--z-drawer" },
+    "modal":    { "value": 800, "css": "--z-modal" },
+    "toast":    { "value": 900, "css": "--z-toast" }
+  },
+
+  "motion": {
+    "duration": {
+      "1": { "value": "80ms",  "css": "--dur-1", "use": "按下、勾选" },
+      "2": { "value": "120ms", "css": "--dur-2", "use": "hover、focus" },
+      "3": { "value": "180ms", "css": "--dur-3", "use": "下拉、抽屉、Toast 进入" }
+    },
+    "easing": {
+      "standard": { "value": "cubic-bezier(0.2, 0, 0, 1)", "css": "--ease" },
+      "out":      { "value": "cubic-bezier(0, 0, 0.2, 1)", "css": "--ease-out" }
+    },
+    "$forbidden": ["cubic-bezier(0.68, -0.55, 0.265, 1.55)", "任何 overshoot / spring / bounce", "时长 > 200ms 的界面过渡"],
+    "$rule": "prefers-reduced-motion: reduce 时全部降为 1ms。轮询刷新时数字禁止 count-up 动画——SRE 需要读到真值而非过渡值。"
+  },
+
+  "layout": {
+    "sidebarWidth":          { "value": "216px",  "css": "--sidebar-w" },
+    "sidebarWidthCollapsed": { "value": "56px",   "css": "--sidebar-w-collapsed" },
+    "topbarHeight":          { "value": "48px",   "css": "--topbar-h" },
+    "contentMax":            { "value": "1440px", "css": "--content-max" },
+    "gutter":                { "value": "24px",   "css": "--gutter" },
+    "rowHeight":             { "value": "36px",   "css": "--row-h" },
+    "rowHeightTouch":        { "value": "44px",   "css": "--row-h-touch" },
+    "tapMin":                { "value": "44px",   "css": "--tap-min" },
+    "breakpoints": {
+      "sm": { "value": "640px",  "behavior": "单列，侧栏转抽屉，表格转卡片列表" },
+      "md": { "value": "900px",  "behavior": "侧栏折叠为图标条，KPI 2 列" },
+      "lg": { "value": "1200px", "behavior": "侧栏展开，KPI 3 列，表格全列" },
+      "xl": { "value": "1600px", "behavior": "KPI 6 列，图表并排双栏" }
+    }
+  },
+
+  "component": {
+    "button": {
+      "height":       { "value": "30px", "css": "--btn-h" },
+      "heightLg":     { "value": "36px", "css": "--btn-h-lg" },
+      "paddingX":     { "value": "{space.3}", "css": "--btn-pad-x" },
+      "radius":       { "value": "{radius.md}", "css": "--btn-radius" },
+      "primaryBg":    { "value": "{semantic.accent}", "css": "--btn-primary-bg" },
+      "primaryFg":    { "value": "{semantic.accentOn}", "css": "--btn-primary-fg" },
+      "secondaryBg":  { "value": "{semantic.surface}", "css": "--btn-secondary-bg" },
+      "ghostFg":      { "value": "{semantic.fg2}", "css": "--btn-ghost-fg" },
+      "dangerFg":     { "value": "{semantic.danger}", "css": "--btn-danger-fg" }
+    },
+    "field": {
+      "height":      { "value": "30px", "css": "--field-h" },
+      "heightLg":    { "value": "36px", "css": "--field-h-lg" },
+      "radius":      { "value": "{radius.md}", "css": "--field-radius" },
+      "borderFocus": { "value": "{semantic.accent}", "css": "--field-border-focus" },
+      "borderError": { "value": "{semantic.danger}", "css": "--field-border-error" }
+    },
+    "table": {
+      "headerBg":   { "value": "{semantic.surface2}", "css": "--table-header-bg" },
+      "rowHeight":  { "value": "{layout.rowHeight}", "css": "--table-row-h" },
+      "rowHover":   { "value": "{semantic.surface3}", "css": "--table-row-bg-hover" },
+      "rowSelected":{ "value": "{semantic.accentSoft}", "css": "--table-row-bg-selected" },
+      "divider":    { "value": "{semantic.borderSoft}", "css": "--table-divider" },
+      "numFont":    { "value": "{typography.family.mono}", "css": "--table-num-font" }
+    },
+    "panel": {
+      "radius":   { "value": "{radius.lg}", "css": "--panel-radius" },
+      "padding":  { "value": "{space.4}", "css": "--panel-pad" },
+      "headerH":  { "value": "36px", "css": "--panel-header-h" }
+    },
+    "badge": {
+      "height": { "value": "18px", "css": "--badge-h" },
+      "radius": { "value": "{radius.sm}", "css": "--badge-radius" },
+      "fontSize": { "value": "{typography.size.micro}", "css": "--badge-fs" }
+    },
+    "icon": {
+      "sm":     { "value": "16px", "css": "--icon-sm", "use": "行内、表格、按钮内" },
+      "md":     { "value": "20px", "css": "--icon-md", "use": "导航、工具栏" },
+      "lg":     { "value": "24px", "css": "--icon-lg", "use": "空状态、错误页" },
+      "stroke": { "value": 1.5,    "css": "--icon-stroke", "$description": "全 sprite 恒定，不允许混用 2 或 1" }
+    }
+  },
+
+  "accessibility": {
+    "contrastTargets": {
+      "bodyText": "≥ 4.5:1",
+      "metaText12px": "≥ 4.5:1（12px 不视为大字号，不得放宽到 3:1）",
+      "iconAndBorder": "≥ 3:1",
+      "focusRing": "≥ 3:1 相对相邻色"
+    },
+    "verified": [
+      { "pair": "light --c-fg #16191d on #ffffff",       "ratio": 17.63, "pass": "AAA" },
+      { "pair": "light --c-muted #656d76 on #ffffff",    "ratio": 5.25,  "pass": "AA" },
+      { "pair": "light --c-accent #1957c8 on #ffffff",   "ratio": 6.48,  "pass": "AA" },
+      { "pair": "light --c-ok #12724a on #ffffff",       "ratio": 5.95,  "pass": "AA" },
+      { "pair": "light --c-warn #8a5a0b on #ffffff",     "ratio": 5.92,  "pass": "AA" },
+      { "pair": "light --c-danger #b01d26 on #ffffff",   "ratio": 6.89,  "pass": "AA" },
+      { "pair": "light --c-degraded #0d6b78 on #ffffff", "ratio": 6.19,  "pass": "AA" },
+      { "pair": "light --c-border-field #8b939c on #ffffff", "ratio": 3.11, "pass": "AA (1.4.11 非文本)" },
+      { "pair": "dark --c-fg #e8ebef on #161a20",        "ratio": 14.60, "pass": "AAA" },
+      { "pair": "dark --c-muted #8e97a2 on #161a20",     "ratio": 5.90,  "pass": "AA" },
+      { "pair": "dark --c-accent #4c8dff on #161a20",    "ratio": 5.46,  "pass": "AA" },
+      { "pair": "dark --c-ok #3fbf7f on #161a20",        "ratio": 7.46,  "pass": "AAA" },
+      { "pair": "dark --c-warn #e0a32e on #161a20",      "ratio": 7.86,  "pass": "AAA" },
+      { "pair": "dark --c-danger #f0666e on #161a20",    "ratio": 5.68,  "pass": "AA" },
+      { "pair": "dark --c-degraded #46c2d2 on #161a20",  "ratio": 8.24,  "pass": "AAA" },
+      { "pair": "dark --c-border-field #6a737e on #161a20", "ratio": 3.63, "pass": "AA (1.4.11 非文本)" }
+    ],
+    "knownBelowThreshold": [
+      { "pair": "--c-border on --c-surface", "ratio": "1.38 (light) / 1.31 (dark)", "$justification": "纯装饰性分隔线与面板轮廓，不承载信息、不构成控件边界，WCAG 1.4.11 不适用。需被识别的控件边界一律改用 --c-border-field。" },
+      { "pair": "--c-meta on --c-surface", "ratio": "3.11 (light) / 3.63 (dark)", "$justification": "仅用于 placeholder 与已停用态标签这类非必要信息；任何用户必须读到的元数据用 --c-muted（≥5.2:1）。" }
+    ],
+    "$note": "上述比值按 WCAG 2.1 相对亮度公式实测计算（非估值）。仍需在实现后用 axe / devtools 复核实际渲染层叠结果。语义色一律不单独承载信息，必须叠加文字标签 + 形状（见 semantic.statusMapping.dotShape）。"
+  }
+}

@@ -1,0 +1,87 @@
+groups:
+  - name: unirate-gateway
+    interval: 30s
+    rules:
+      # 静默降级是最危险的状态：限流看似在跑，实际已失效。
+      # Spec §5.2 只告警「拒绝率过高」，却没有告警「限流器自身失效」——
+      # 后者才是真正需要立刻叫人起床的。
+      - alert: RateLimiterDegraded
+        expr: unirate_redis_breaker_open > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "限流器已进入降级模式，配额约束不再精确"
+          description: "Redis 熔断器打开超过 1 分钟。此时 metric=request 规则可能放行超额流量，token 预算退化为本地保守配额。"
+
+      - alert: DegradedDecisionRate
+        expr: sum(rate(unirate_degraded_decisions_total[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存在降级路径下作出的限流决策"
+          description: "每秒 {{ $value | printf \"%.2f\" }} 个决策在降级模式下作出。"
+
+      - alert: HighRejectRate
+        expr: |
+          sum(rate(unirate_requests_total{decision="reject"}[5m]))
+          /
+          clamp_min(sum(rate(unirate_requests_total[5m])), 0.001) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "拒绝率超过 30%"
+          description: "当前拒绝占比 {{ $value | humanizePercentage }}，可能是配额过紧或遭遇异常流量。"
+
+      - alert: RedisErrorsElevated
+        expr: sum(rate(unirate_redis_errors_total[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 操作错误率升高"
+          description: "每秒 {{ $value | printf \"%.2f\" }} 次失败，可能是连接池不足或网络抖动。"
+
+      # 并发计数器泄漏检测：in_flight 长期高位不落，说明 release 路径有问题
+      - alert: ConcurrencyLeakSuspected
+        expr: |
+          min_over_time(unirate_concurrency_in_flight[15m]) > 10
+          and
+          sum(rate(unirate_requests_total[15m])) < 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "疑似并发额度泄漏"
+          description: "biz={{ $labels.biz }} 在无流量情况下仍持有并发额度，release 路径可能未执行。"
+
+      - alert: UpstreamErrorsHigh
+        expr: sum by (biz) (rate(unirate_upstream_errors_total[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游错误率升高 (biz={{ $labels.biz }})"
+
+      - alert: GatewayLatencyP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(unirate_request_duration_seconds_bucket{decision="reject"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "拒绝路径 P99 延迟超过 50ms"
+          description: "限流判定本身应在毫秒级完成，超过 50ms 说明 Redis 往返异常。"
+
+      - alert: ConfigStale
+        expr: unirate_config_version == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "网关未加载到任何配置"
+          description: "config_version 为 0，网关无法路由任何业务域。"

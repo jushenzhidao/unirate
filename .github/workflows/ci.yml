@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "release/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.22"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: 静态检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未格式化:"; echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go mod tidy 一致性
+        run: |
+          cp go.mod go.mod.bak && cp go.sum go.sum.bak
+          go mod tidy
+          diff go.mod go.mod.bak || { echo "go.mod 未同步，请本地执行 go mod tidy"; exit 1; }
+          diff go.sum go.sum.bak || { echo "go.sum 未同步，请本地执行 go mod tidy"; exit 1; }
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59
+          args: --timeout=5m
+
+  unit-test:
+    name: 单元测试（含 race 与真实 Redis）
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        # 注意：此处刻意不设 requirepass。若要加密码，
+        # 必须同步设置下方的 REDIS_PASSWORD，否则测试会因 NOAUTH 而失败。
+        # （REDIS_REQUIRED=1 会让这种失败立刻暴露，而不是静默跳过。）
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # race 检测是必须的：限流器的并发正确性无法靠人工 review 保证
+      #
+      # REDIS_REQUIRED=1 是关键：限流内核测试依赖真实 Redis，
+      # 若连不上就静默 Skip，CI 会在「核心逻辑一行未执行」的情况下报绿。
+      # 这个坑真实发生过 —— compose 的 Redis 带密码而测试不带，
+      # 11 个测试全部跳过，覆盖率停在 36.6% 却仍然 PASS。
+      - name: 运行测试
+        env:
+          REDIS_ADDR: 127.0.0.1:6379
+          REDIS_REQUIRED: "1"
+        run: |
+          go test -race -count=1 -covermode=atomic \
+            -coverprofile=coverage.out ./...
+
+      # 断言核心测试确实执行过，而非被跳过
+      - name: 校验限流内核未被跳过
+        env:
+          REDIS_ADDR: 127.0.0.1:6379
+          REDIS_REQUIRED: "1"
+        run: |
+          out=$(go test ./internal/limiter/... -count=1 -v 2>&1)
+          skipped=$(printf '%s' "$out" | grep -c '^--- SKIP' || true)
+          passed=$(printf '%s' "$out" | grep -c '^--- PASS' || true)
+          echo "限流内核: PASS=${passed} SKIP=${skipped}"
+          if [ "$skipped" -gt 0 ]; then
+            printf '%s\n' "$out" | grep '^--- SKIP' -A2
+            echo "::error::限流内核存在被跳过的测试，核心逻辑未获验证"
+            exit 1
+          fi
+          if [ "$passed" -lt 10 ]; then
+            echo "::error::限流内核通过数 ${passed} 异常偏低，测试可能未真正运行"
+            exit 1
+          fi
+
+      - name: 覆盖率摘要
+        run: |
+          go tool cover -func=coverage.out | tail -30
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "总覆盖率: ${total}%"
+          echo "### 测试覆盖率: ${total}%" >> "$GITHUB_STEP_SUMMARY"
+
+          # 限流内核是本项目的正确性核心，覆盖率不得退化
+          lim=$(go tool cover -func=coverage.out \
+            | grep 'internal/limiter' \
+            | awk '{gsub("%","",$NF); s+=$NF; n++} END {if(n>0) printf "%.1f", s/n; else print "0"}')
+          echo "限流内核平均覆盖率: ${lim}%"
+          echo "### 限流内核覆盖率: ${lim}%" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  security:
+    name: 安全扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # 依赖已知漏洞扫描
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: gosec
+        uses: securego/gosec@master
+        with:
+          args: -exclude-dir=test -severity=medium ./...
+
+  build-image:
+    name: 构建镜像
+    runs-on: ubuntu-latest
+    needs: [lint, unit-test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=short
+            type=semver,pattern={{version}}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  e2e:
+    name: 端到端验收
+    runs-on: ubuntu-latest
+    needs: [lint, unit-test]
+    steps:
+      - uses: actions/checkout@v4
+
+      # compose 依赖 .env 提供端口与凭证。缺失时变量会退化为默认值，
+      # 容易与 e2e 脚本的预期不一致，因此显式生成。
+      - name: 准备环境变量
+        run: |
+          cp .env.example .env
+          sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN=ci-admin-token-for-e2e-32chars/' .env
+          grep -E '^(ADMIN_TOKEN|PROXY_PORT|OBS_PORT|ADMIN_PORT)=' .env
+
+      - name: 启动完整栈
+        env:
+          ADMIN_TOKEN: ci-admin-token-for-e2e-32chars
+        run: |
+          docker compose up -d --build
+          echo "等待网关就绪..."
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:29091/ready >/dev/null 2>&1; then
+              echo "网关就绪（耗时 ${i}s）"; break
+            fi
+            if [ "$i" = "60" ]; then
+              echo "网关启动超时"; docker compose logs --tail=200; exit 1
+            fi
+            sleep 1
+          done
+
+      - name: 执行验收脚本
+        env:
+          ADMIN_TOKEN: ci-admin-token-for-e2e-32chars
+        run: |
+          chmod +x test/e2e/run.sh
+          ./test/e2e/run.sh
+
+      - name: 失败时导出日志
+        if: failure()
+        run: docker compose logs --tail=400
+
+      - name: 清理
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>unirate 管理控制台</title>
+<!-- 主题必须在首绘前同步写入，否则一帧白闪；tokens.css 不含系统偏好分支，
+     缺失时会退化为 light。try/catch 是必需的：隐私模式下 localStorage 取值抛异常，
+     不能让主题脚本把整页 JS 打断（DESIGN.md §9.2）。 -->
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('unirate_theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') {
+      t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="layout.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="overlay.css">
+<link rel="stylesheet" href="charts.css">
+</head>
+<body>
+<!-- 图标 sprite：display:none，不占布局、不产生 CLS -->
+<div id="sprite-host" hidden></div>
+
+<!-- 登录视图：单面板居中偏上，不做 Hero -->
+<main class="auth-wrap" id="view-auth" hidden>
+  <form class="auth-card" id="auth-form" novalidate>
+    <svg class="icon icon--lg" aria-hidden="true"><use href="#i-shield"/></svg>
+    <h1>unirate 管理控制台</h1>
+    <p class="auth-lede">需要 Admin Bearer Token 才能访问</p>
+
+    <div class="form-row">
+      <label for="auth-token">Admin Token</label>
+      <div class="field-affix">
+        <svg class="icon affix-lead" aria-hidden="true"><use href="#i-key"/></svg>
+        <input class="field field--lg field--mono" id="auth-token" type="password"
+               autocomplete="off" spellcheck="false" autocapitalize="off"
+               aria-describedby="auth-help" required>
+        <button class="affix-btn" type="button" id="auth-reveal" aria-label="显示令牌明文">
+          <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>
+        </button>
+      </div>
+      <p class="helper" id="auth-help">令牌由部署时的 ADMIN_TOKEN 提供，仅存于本页会话</p>
+      <div id="auth-error" role="alert"></div>
+    </div>
+
+    <div class="form-row">
+      <label for="auth-operator">操作者名（可选）</label>
+      <input class="field field--lg" id="auth-operator" type="text" autocomplete="off"
+             placeholder="例如 zhangsan" aria-describedby="auth-operator-help">
+      <p class="helper" id="auth-operator-help">写操作会带上此名，用于审计日志可读性。留空则记为 unknown</p>
+    </div>
+
+    <button class="btn btn--primary btn--lg btn--block" type="submit" id="auth-submit">进入控制台</button>
+  </form>
+  <p class="auth-note">Token 仅保存在当前标签页的 sessionStorage，关闭标签页即失效。</p>
+  <div class="auth-foot">
+    <span class="mono">unirate</span>
+    <span class="mono" id="auth-version">版本 —</span>
+    <a href="https://github.com/unirate/gateway#readme" target="_blank" rel="noreferrer noopener">
+      文档 <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg>
+    </a>
+  </div>
+</main>
+
+<!-- 控制台视图 -->
+<div class="app" id="view-app" hidden>
+  <div class="brand">
+    <svg class="icon icon--md" aria-hidden="true"><use href="#i-server"/></svg>
+    <span class="brand-name">unirate</span>
+  </div>
+
+  <header class="topbar">
+    <button class="btn btn--ghost btn--icon" type="button" id="nav-toggle"
+            aria-label="打开导航" aria-expanded="false" aria-controls="side-nav">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-menu"/></svg>
+    </button>
+    <span class="topbar-crumb" id="crumb">监控看板</span>
+    <span class="topbar-spacer"></span>
+    <!-- 健康胶囊常驻：任何页面都能看到熔断状态与 config version -->
+    <span class="health" id="health" data-state="unknown" role="status">
+      <svg class="icon" aria-hidden="true"><use href="#i-status-off"/></svg>
+      <span id="health-label">状态未知</span>
+      <span class="health-ver num" id="health-version">v—</span>
+    </span>
+    <button class="btn btn--ghost btn--icon" type="button" id="theme-toggle" aria-label="切换明暗主题">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-moon"/></svg>
+    </button>
+    <button class="btn btn--ghost" type="button" id="logout">
+      <svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg>登出
+    </button>
+  </header>
+
+  <nav class="side" id="side-nav" aria-label="模块导航">
+    <a class="nav-item" href="#/monitor" data-nav="monitor">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-nav-monitor"/></svg>
+      <span class="nav-label">监控看板</span>
+    </a>
+    <a class="nav-item" href="#/rules" data-nav="rules">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-nav-rules"/></svg>
+      <span class="nav-label">限流规则</span>
+    </a>
+    <a class="nav-item" href="#/audit" data-nav="audit">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-nav-audit"/></svg>
+      <span class="nav-label">审计日志</span>
+    </a>
+    <a class="nav-item" href="#/config" data-nav="config">
+      <svg class="icon icon--md" aria-hidden="true"><use href="#i-nav-config"/></svg>
+      <span class="nav-label">配置快照</span>
+    </a>
+    <div class="side-foot">
+      <div class="side-sep"></div>
+      <span class="nav-item" aria-hidden="true" style="color: var(--c-meta)">
+        <svg class="icon icon--md"><use href="#i-user"/></svg>
+        <span class="nav-label mono" id="side-operator">unknown</span>
+      </span>
+    </div>
+  </nav>
+
+  <main class="content" id="outlet" tabindex="-1"></main>
+</div>
+
+<div class="toasts" id="toasts" role="region" aria-label="操作反馈" aria-live="polite"></div>
+<div id="overlay-host"></div>
+
+<!-- 加载顺序有依赖：dom → api → 基础设施（overlay/charts/metrics/rule-fields）
+     → 页面模块 → app（app.js 末尾即启动，必须最后）。
+     各模块只在 IIFE 内注册全局对象，不在加载期互相调用，因此同步 script 即可，
+     不需要模块加载器。 -->
+<script src="dom.js"></script>
+<script src="api.js"></script>
+<script src="overlay.js"></script>
+<script src="charts.js"></script>
+<script src="metrics.js"></script>
+<script src="rule-fields.js"></script>
+<script src="monitor-kpi.js"></script>
+<script src="rules-inner-table.js"></script>
+<script src="page-login.js"></script>
+<script src="page-monitor.js"></script>
+<script src="page-rules.js"></script>
+<script src="page-rules-form.js"></script>
+<script src="page-biz-form.js"></script>
+<script src="page-audit.js"></script>
+<script src="page-config.js"></script>
+<script src="page-policy.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

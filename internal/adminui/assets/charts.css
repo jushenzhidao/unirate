@@ -1,0 +1,192 @@
+/* ============================================================================
+   图表与页面专属样式（DESIGN.md §6）
+   纯 SVG 手绘 + HTML 条形，无图表库。
+   ========================================================================== */
+
+/* ---- KPI 卡 ------------------------------------------------------------- */
+.kpi {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--panel-radius);
+  background: var(--c-surface);
+  min-width: 0;
+}
+.kpi > header { display: flex; align-items: center; gap: var(--sp-2); }
+.kpi > header .icon { margin-left: auto; color: var(--c-meta); }
+.kpi-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-kpi);
+  font-weight: var(--fw-anno);
+  letter-spacing: var(--ls-kpi);
+  line-height: var(--lh-tight);
+  color: var(--c-fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kpi-value small { margin-left: 2px; font-size: var(--fs-cap); font-weight: var(--fw-read); color: var(--c-muted); }
+.kpi-value[data-state="warning"] { color: var(--c-warn); }
+.kpi-value[data-state="failed"]  { color: var(--c-danger); }
+.kpi-value[data-state="degraded"]{ color: var(--c-degraded); }
+.kpi > footer { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; }
+.kpi .spark { width: 120px; height: 32px; flex: none; }
+/* delta 只表方向不表好坏：QPS 涨是好事、拒绝率涨是坏事，不用红绿（DESIGN.md §8） */
+.delta {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 2px;
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--c-muted); white-space: nowrap;
+}
+.delta .icon { width: 12px; height: 12px; }
+.kpi[data-stale="1"] { opacity: 0.6; }
+
+/* ---- 折线 / 柱状 ------------------------------------------------------- */
+.chart-box { position: relative; }
+/* 轴标签放在 SVG 外层容器，避免被 preserveAspectRatio=none 拉变形 */
+.chart-line { width: 100%; height: 160px; display: block; }
+.chart-bars { width: 100%; height: 160px; display: block; }
+.chart-axis-y {
+  position: absolute; left: 0; top: 0; bottom: 18px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--c-meta); pointer-events: none;
+}
+.chart-axis-x {
+  display: flex; justify-content: space-between;
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--c-meta);
+}
+.chart-legend { display: flex; gap: var(--sp-3); margin-left: auto; font-size: var(--fs-micro); color: var(--c-muted); }
+.chart-legend i { display: inline-block; width: 10px; height: 2px; margin-right: 4px; vertical-align: 2px; border-radius: var(--r-pill); }
+.chart-tip {
+  position: absolute; z-index: var(--z-dropdown);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  box-shadow: var(--sh-md);
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  color: var(--c-fg); white-space: nowrap; pointer-events: none;
+}
+.chart-pad { padding-left: 46px; }
+
+/* ---- 横向条（biz 拒绝 Top 10 / 规则水位）------------------------------
+   用 HTML 而非 SVG：条上要叠中文与数字，HTML 的 text-overflow 更可靠，
+   且天然可点击、可 focus、可读屏。 */
+.bars { display: flex; flex-direction: column; }
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr 72px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--panel-pad);
+  border-bottom: 1px solid var(--table-divider);
+  background: transparent;
+  border-left: 0; border-right: 0; border-top: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--c-fg);
+  cursor: pointer;
+}
+.bar-row:hover { background: var(--table-row-bg-hover); }
+.bar-row > .bar-name {
+  font-family: var(--font-mono); font-size: var(--fs-cap);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bar-row > .bar-num {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-cap); text-align: right;
+}
+.bar-track { height: 6px; border-radius: var(--r-pill); background: var(--c-surface-2); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: var(--r-pill); background: var(--c-chart-2); }
+.bar-fill[data-state="healthy"]  { background: var(--c-accent); }
+.bar-fill[data-state="warning"]  { background: var(--c-warn); }
+.bar-fill[data-state="failed"]   { background: var(--c-danger); }
+.bar-rule { grid-column: 1 / -1; color: var(--c-muted); font-size: var(--fs-micro); }
+
+/* ---- 两级表格（biz → 规则）-------------------------------------------- */
+.expander {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--c-muted); cursor: pointer;
+}
+.expander:hover { background: var(--c-surface-2); color: var(--c-fg); }
+.expander[aria-expanded="true"] .icon { transform: rotate(90deg); }
+.expander .icon { transition: transform var(--dur-2) var(--ease); }
+tr.sub > td { padding: 0; background: var(--c-surface-2); }
+.sub-wrap { padding: var(--sp-3) var(--sp-4); }
+table.tbl--inner td, table.tbl--inner th { background: transparent; }
+table.tbl--inner th { position: static; border-bottom-color: var(--c-border); }
+.dim-list { display: flex; flex-wrap: wrap; gap: 4px; max-width: 200px; }
+
+/* ---- 审计 detail 行内展开 --------------------------------------------- */
+.detail-pre {
+  margin: 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  font-family: var(--font-mono); font-size: var(--fs-cap);
+  line-height: var(--lh-body);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px; overflow: auto;
+  color: var(--c-fg-2);
+}
+.detail-trunc-note { margin-top: var(--sp-2); color: var(--c-warn); font-size: var(--fs-micro); }
+.link-btn {
+  border: 0; background: transparent; padding: 0;
+  font: inherit; color: var(--c-fg); cursor: pointer;
+  text-align: left; text-decoration: underline;
+  text-decoration-color: var(--c-border-strong);
+  text-underline-offset: 2px;
+}
+.link-btn:hover { text-decoration-color: var(--c-fg); }
+
+/* ---- 配置快照 --------------------------------------------------------- */
+.cfg-grid { display: grid; grid-template-columns: 340px 1fr; gap: var(--sp-4); align-items: start; }
+@media (max-width: 1199px) { .cfg-grid { grid-template-columns: 1fr; } }
+.dl { margin: 0; display: grid; grid-template-columns: 1fr; }
+.dl > div {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--table-divider);
+}
+.dl dt { color: var(--c-muted); font-size: var(--fs-cap); }
+.dl dd { margin: 0; text-align: right; min-width: 0; }
+.dl dd .num { font-size: var(--fs-lg); }
+.dl dd small { display: block; color: var(--c-meta); font-size: var(--fs-micro); }
+
+.json-view {
+  margin: 0;
+  max-height: 560px; overflow: auto;
+  padding: var(--sp-3);
+  background: var(--c-surface-2);
+  font-family: var(--font-mono); font-size: var(--fs-cap);
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--c-fg-2);
+  counter-reset: ln;
+}
+.json-line { display: block; }
+.json-line::before {
+  content: counter(ln);
+  counter-increment: ln;
+  display: inline-block; width: 3.2em; margin-right: var(--sp-2);
+  text-align: right; color: var(--c-meta);
+  user-select: none;
+}
+.json-line mark { background: var(--c-warn-soft); color: var(--c-warn); border-radius: 2px; }
+
+/* ---- 运行策略编辑区 --------------------------------------------------- */
+.pol-item { padding: var(--sp-3) 0; border-bottom: 1px solid var(--table-divider); }
+.pol-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.pol-key { font-family: var(--font-mono); font-size: var(--fs-body); font-weight: var(--fw-emph); }
+.pol-src { font-size: var(--fs-micro); }
+.pol-ctl { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
+.pol-ctl .field { width: 180px; }
+.pol-bound { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--c-meta); }
+.pol-desc { margin-top: var(--sp-1); color: var(--c-muted); font-size: var(--fs-cap); line-height: var(--lh-body); }
+.pol-warn { margin-top: var(--sp-2); }

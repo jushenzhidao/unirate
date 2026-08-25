@@ -1,0 +1,81 @@
+/* ============================================================================
+   浮层组件：抽屉 / 模态 / Toast
+   从 components.css 拆出（单文件 ≤300 行）。所有值走 var()，本文件无裸 hex。
+   ========================================================================== */
+
+/* ---- 抽屉（规则表单）--------------------------------------------------- */
+.scrim {
+  position: fixed; inset: 0; z-index: var(--z-drawer);
+  background: rgba(14, 17, 22, 0.44);
+}
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-drawer);
+  width: min(520px, 100vw);
+  display: flex; flex-direction: column;
+  background: var(--c-surface);
+  border-left: 1px solid var(--c-border);
+  box-shadow: var(--sh-lg);
+}
+.drawer-head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+}
+.drawer-title { font-size: var(--fs-title); font-weight: var(--fw-anno); letter-spacing: var(--ls-title); }
+.drawer-body { flex: 1 1 auto; overflow-y: auto; padding: var(--sp-4); }
+.drawer-foot {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+.fieldset { border: 0; margin: 0 0 var(--sp-4); padding: 0; }
+.fieldset > legend {
+  padding: 0; margin-bottom: var(--sp-2);
+  font-size: var(--fs-micro); font-weight: var(--fw-emph);
+  letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--c-muted);
+}
+
+/* ---- 模态（确认删除 / 重载）------------------------------------------- */
+.modal-wrap { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: start center; padding: 12vh var(--sp-4) var(--sp-4); }
+.modal {
+  width: min(440px, 100%);
+  background: var(--c-surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--sh-lg);
+  padding: var(--sp-5);
+}
+.modal h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); font-weight: var(--fw-anno); }
+.modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-4); }
+
+/* ---- Toast ------------------------------------------------------------- */
+.toasts {
+  position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: var(--z-toast);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  width: min(380px, calc(100vw - var(--sp-8)));
+}
+.toast {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--sh-md);
+  font-size: var(--fs-cap);
+  line-height: var(--lh-body);
+  color: var(--c-fg);
+}
+.toast .icon { flex: none; margin-top: 1px; }
+.toast[data-kind="ok"] .icon     { color: var(--c-ok); }
+.toast[data-kind="danger"] .icon { color: var(--c-danger); }
+.toast[data-kind="warn"] .icon   { color: var(--c-warn); }
+.toast pre {
+  margin: var(--sp-2) 0 0;
+  max-height: 140px; overflow: auto;
+  font-family: var(--font-mono); font-size: var(--fs-micro);
+  white-space: pre-wrap; word-break: break-all;
+  color: var(--c-muted);
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

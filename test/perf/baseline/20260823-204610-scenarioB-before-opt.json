@@ -1,0 +1,213 @@
+{
+  "meta": {
+    "scenario": "B",
+    "label": "before-opt",
+    "concurrency_levels": [
+      500
+    ],
+    "rounds": 5,
+    "duration_per_round": "20s",
+    "warmup": "30s",
+    "started_at": "2026-08-23T12:46:22.997889968Z",
+    "client_runtime": "GOMAXPROCS=5 NumCPU=5 GOOS=linux GOARCH=arm64"
+  },
+  "environment_declaration": {
+    "host": "Docker Desktop 5 核 / 8GB（开发机，非专用压测环境）",
+    "client_colocated_with_target": true,
+    "caveats": [
+      "压测客户端与被测服务运行在同一宿主，争抢同一批 CPU",
+      "宿主同时运行多个无关容器，存在邻居噪声",
+      "绝对数字不可作生产容量参考；仅用于优化前后同环境对比",
+      "归因结论必须依据 container_cpu 字段，缺失时结论不成立"
+    ]
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "concurrency": 500,
+      "qps": 18567.25756963882,
+      "latency": {
+        "max_ms": 25.63,
+        "mean_ms": 18.17,
+        "n": 500,
+        "p50_ms": 16.54,
+        "p90_ms": 22.96,
+        "p999_ms": 25.63,
+        "p99_ms": 24.11
+      },
+      "status_codes": {
+        "200": 50,
+        "429": 450
+      },
+      "transport_errors": 0,
+      "passed": 50,
+      "rejected": 450,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 24.71,
+      "redis_evalsha_calls": 500,
+      "redis_cpu_seconds_consumed": 0.015,
+      "redis_cores_used": 0.573
+    },
+    {
+      "round": 2,
+      "concurrency": 500,
+      "qps": 11683.971836299983,
+      "latency": {
+        "max_ms": 39.53,
+        "mean_ms": 21.58,
+        "n": 500,
+        "p50_ms": 17.21,
+        "p90_ms": 37.4,
+        "p999_ms": 39.53,
+        "p99_ms": 38.11
+      },
+      "status_codes": {
+        "200": 50,
+        "429": 450
+      },
+      "transport_errors": 0,
+      "passed": 50,
+      "rejected": 450,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 10.5,
+      "redis_evalsha_calls": 500,
+      "redis_cpu_seconds_consumed": 0.012,
+      "redis_cores_used": 0.286
+    },
+    {
+      "round": 3,
+      "concurrency": 500,
+      "qps": 23416.73594117716,
+      "latency": {
+        "max_ms": 19.01,
+        "mean_ms": 10.64,
+        "n": 500,
+        "p50_ms": 11.22,
+        "p90_ms": 13.61,
+        "p999_ms": 19.01,
+        "p99_ms": 18.2
+      },
+      "status_codes": {
+        "200": 50,
+        "429": 450
+      },
+      "transport_errors": 0,
+      "passed": 50,
+      "rejected": 450,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 15.75,
+      "redis_evalsha_calls": 500,
+      "redis_cpu_seconds_consumed": 0.011,
+      "redis_cores_used": 0.532
+    },
+    {
+      "round": 4,
+      "concurrency": 500,
+      "qps": 14604.865225281363,
+      "latency": {
+        "max_ms": 30.44,
+        "mean_ms": 20.09,
+        "n": 500,
+        "p50_ms": 19.03,
+        "p90_ms": 27.43,
+        "p999_ms": 30.44,
+        "p99_ms": 29.17
+      },
+      "status_codes": {
+        "200": 50,
+        "429": 450
+      },
+      "transport_errors": 0,
+      "passed": 50,
+      "rejected": 450,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 25.59,
+      "redis_evalsha_calls": 500,
+      "redis_cpu_seconds_consumed": 0.014,
+      "redis_cores_used": 0.418
+    },
+    {
+      "round": 5,
+      "concurrency": 500,
+      "qps": 11716.896258858296,
+      "latency": {
+        "max_ms": 38.81,
+        "mean_ms": 19.93,
+        "n": 500,
+        "p50_ms": 19.44,
+        "p90_ms": 26.69,
+        "p999_ms": 38.81,
+        "p99_ms": 32.91
+      },
+      "status_codes": {
+        "200": 50,
+        "429": 450
+      },
+      "transport_errors": 0,
+      "passed": 50,
+      "rejected": 450,
+      "redis_breaker_open": 0,
+      "concurrency_in_flight_after": 0,
+      "sse_streams_active_after": 0,
+      "redis_evalsha_usec_per_call": 10.36,
+      "redis_evalsha_calls": 500,
+      "redis_cpu_seconds_consumed": 0.013,
+      "redis_cores_used": 0.312
+    }
+  ],
+  "median": [
+    {
+      "concurrency": 500,
+      "qps_median": 14604.87,
+      "qps_spread_percent": 60.3,
+      "p50_median": "17.21ms",
+      "p99_median": "29.17ms",
+      "redis_cores_median": 0.418
+    }
+  ],
+  "container_cpu": {
+    "available": true,
+    "redis_cpu_percent": 1.53,
+    "gateway_cpu_percent": 4.5,
+    "samples": 2
+  },
+  "bottleneck_attribution": "两侧均未饱和（Redis 1.5%，gateway 4.5%）→ 瓶颈可能在压测客户端或网络；须加客户端资源重测，本轮数据不可用于容量结论",
+  "verdict": {
+    "pass": true,
+    "checks": [
+      {
+        "name": "redis_breaker_open 恒为 0",
+        "pass": true,
+        "detail": "全轮次均为 0"
+      },
+      {
+        "name": "传输层无错误",
+        "pass": true,
+        "detail": "累计传输错误 0"
+      },
+      {
+        "name": "拒绝路径精度：通过数恰好 50（零误差）",
+        "pass": true,
+        "detail": "全 5 轮均恰好通过 50 个"
+      },
+      {
+        "name": "多轮离散度（场景 B 不适用）",
+        "pass": true,
+        "detail": "场景 B 为瞬时齐发，QPS 抖动不反映数据质量；其可信度由「通过数恰好等于 limit」直接保证"
+      },
+      {
+        "name": "双侧 CPU 归因数据具备",
+        "pass": true,
+        "detail": "两侧均未饱和（Redis 1.5%，gateway 4.5%）→ 瓶颈可能在压测客户端或网络；须加客户端资源重测，本轮数据不可用于容量结论"
+      }
+    ]
+  }
+}

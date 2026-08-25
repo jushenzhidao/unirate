@@ -1,0 +1,210 @@
+# unirate 频控网关 —— 一键可跑编排
+#
+# 安全设计要点：
+#   1. Admin 端口（9090）只绑定 127.0.0.1 且限制来源 CIDR，绝不对外暴露（评审 P0-3）；
+#   2. Redis 强制密码；MySQL 不映射到宿主，仅容器网络内可达；
+#   3. 网关以非 root 运行，只读根文件系统 + 丢弃全部 capabilities；
+#   4. 全部凭证用 ${VAR:?...} 声明为必填，**没有任何默认值**。
+#
+# 关于第 4 条 —— 这是对一个实测确认过的真实缺陷的修复：
+# 本文件曾给 ADMIN_TOKEN 配默认值 change-me-admin-token-32chars-min，
+# 用它可直接访问管理面（实测 HTTP 200）。该值公开写在仓库里，等于管理面无鉴权。
+# 占位默认值比"没有默认值"危险得多：它看起来像已经配好了，没人会去复查。
+# 降低部署门槛的正确做法是 `make init` 一键生成强随机凭证，而不是给默认值。
+#
+# 启动： make init && docker compose up -d --build
+# 验收： ./test/e2e/run.sh
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: unirate-redis
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
+      - --maxmemory
+      - 512mb
+      # 计数器不可被随意淘汰：allkeys-lru 会让限流器"丢失记忆"从而放行超额流量。
+      # 用 volatile-lru 只淘汰有 TTL 的键，且所有限流键都带 TTL。
+      - --maxmemory-policy
+      - volatile-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: unirate-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
+      MYSQL_DATABASE: unirate
+      MYSQL_USER: unirate
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+
+  mock-upstream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unirate/gateway:${VERSION:-dev}
+    container_name: unirate-mock-upstream
+    entrypoint: ["/usr/local/bin/mockupstream"]
+    environment:
+      LISTEN_ADDR: ":9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    image: unirate/gateway:${VERSION:-dev}
+    container_name: unirate-gateway
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mock-upstream:
+        condition: service_started
+    environment:
+      PROXY_ADDR: ":8080"
+      OBS_ADDR: ":9091"
+      # Admin 绑 0.0.0.0 是为了让 e2e 从宿主经映射端口访问；
+      # 生产环境应保持默认 127.0.0.1 或仅在内网 overlay 暴露。
+      ADMIN_ADDR: ":9090"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN 未设置。请先执行 make init 生成含强随机凭证的 .env（网关会拒绝弱令牌与仓库占位值启动）}
+      ADMIN_ALLOW_CIDRS: ${ADMIN_ALLOW_CIDRS:-172.16.0.0/12,10.0.0.0/8,127.0.0.0/8,192.168.0.0/16}
+
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
+      REDIS_POOL_SIZE: "256"
+      REDIS_TIMEOUT: 200ms
+
+      MYSQL_DSN: unirate:${MYSQL_PASSWORD:?MYSQL_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}@tcp(mysql:3306)/unirate?parseTime=true&charset=utf8mb4&timeout=5s
+
+      # 东八区：1d/1w 窗口按北京时间零点对齐
+      TZ_OFFSET_SECONDS: "28800"
+      TZ: Asia/Shanghai
+      # 集群实例数，用于 Redis 故障时的本地保守配额估算
+      INSTANCES: "1"
+
+      # compose 内网关直接对外，不存在可信代理 → 不信任 XFF（防伪造）
+      TRUSTED_PROXY_HOPS: "0"
+      # 请求头指定上游默认关闭（SSRF 防护）
+      ALLOW_HEADER_UPSTREAM: "false"
+
+      UPSTREAM_TIMEOUT: 60s
+      TOKEN_FLUSH_INTERVAL: 1s
+      CONFIG_POLL_INTERVAL: 15s
+      SHUTDOWN_GRACE: 30s
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      VERSION: ${VERSION:-dev}
+    ports:
+      - "${PROXY_PORT:-28080}:8080"
+      - "${OBS_PORT:-29091}:9091"
+      # Admin 只绑宿主回环，外部网络无法直达
+      - "127.0.0.1:${ADMIN_PORT:-29090}:9090"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/live"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: unirate-prometheus
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prom-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "${PROM_PORT:-29092}:9090"
+    depends_on: [gateway]
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+    profiles: [obs]
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: unirate-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/grafana/datasource.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      - ./deploy/grafana/dashboard-provider.yml:/etc/grafana/provisioning/dashboards/dp.yml:ro
+      - ./deploy/grafana/dashboard.json:/var/lib/grafana/dashboards/unirate.json:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-29093}:3000"
+    depends_on: [prometheus]
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+    profiles: [obs]
+
+networks:
+  unirate:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  prom-data:
+  grafana-data:

@@ -1,0 +1,143 @@
+{
+  "title": "UniRate 频控网关",
+  "uid": "unirate-main",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "row",
+      "title": "限流器健康度（最高优先级）",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "限流器状态",
+      "description": "熔断器打开意味着限流约束不再精确，是最需要关注的信号。",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "expr": "unirate_redis_breaker_open", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "正常", "color": "green", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "已降级", "color": "red", "index": 1 } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "auto" }
+    },
+    {
+      "type": "stat",
+      "title": "配置版本",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "expr": "unirate_config_version", "refId": "A" }],
+      "options": { "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "type": "timeseries",
+      "title": "降级决策速率",
+      "description": "非零即表示部分请求的限流判定不精确。",
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 1 },
+      "targets": [{
+        "expr": "sum by (mode) (rate(unirate_degraded_decisions_total[1m]))",
+        "legendFormat": "{{mode}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20 } } }
+    },
+    {
+      "type": "row",
+      "title": "流量与决策",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "请求速率（按决策）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [{
+        "expr": "sum by (decision) (rate(unirate_requests_total[1m]))",
+        "legendFormat": "{{decision}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 15, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "拒绝速率（按规则）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [{
+        "expr": "sum by (rule, dimension) (rate(unirate_rejected_total[1m]))",
+        "legendFormat": "{{rule}} / {{dimension}}",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "延迟分位（P50 / P95 / P99）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(unirate_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50", "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(unirate_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95", "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(unirate_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99", "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "并发持有量 / 活跃 SSE 流",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        { "expr": "sum by (biz) (unirate_concurrency_in_flight)", "legendFormat": "并发 {{biz}}", "refId": "A" },
+        { "expr": "sum by (biz) (unirate_sse_streams_active)", "legendFormat": "SSE {{biz}}", "refId": "B" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Token 计量",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Token 预扣 vs 核销",
+      "description": "两条线的差值反映安全缓冲的退差量。若 settled 长期为 0，说明上游未返回 usage。",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "sum(rate(unirate_tokens_reserved_total[1m]))", "legendFormat": "预扣", "refId": "A" },
+        { "expr": "sum(rate(unirate_tokens_settled_total[1m]))", "legendFormat": "核销", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis 错误 / 上游错误",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "sum by (op) (rate(unirate_redis_errors_total[1m]))", "legendFormat": "redis {{op}}", "refId": "A" },
+        { "expr": "sum by (kind) (rate(unirate_upstream_errors_total[1m]))", "legendFormat": "upstream {{kind}}", "refId": "B" }
+      ]
+    }
+  ]
+}

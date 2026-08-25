@@ -1,0 +1,279 @@
+/* ============================================================================
+   unirate 控制台 Design Tokens
+   ----------------------------------------------------------------------------
+   约束：零构建 / 零 npm / 零 CDN。本文件是唯一的色值与尺度定义处，
+        组件样式必须通过 var() 引用，不得再出现裸 hex（例外仅 #fff / #000）。
+
+   分层：
+     A1 primitive   原始色阶与字体栈（仅本文件出现字面值）
+     A2 semantic    语义角色（--c-bg / --c-fg / --c-ok ...）
+     B  component   组件插槽（--btn-* / --table-* / --field-*）
+
+   主题：由 html[data-theme] 单一来源决定（"light" | "dark"）。
+        <head> 内联脚本必须在首绘前同步写入该属性——初值取
+        localStorage.unirate_theme，缺失时回落 matchMedia 系统偏好。
+        故本文件不含 @media (prefers-color-scheme) 分支，dark 值只有一份。
+        light 与 dark 的语义变量名完全对齐，组件 CSS 零分支。
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   A1 · primitive — 中性阶（冷灰，带一点蓝相，避免纯中性灰的"塑料感"）
+   --------------------------------------------------------------------------- */
+:root {
+  --n-0:   #ffffff;
+  --n-25:  #fbfcfc;
+  --n-50:  #f7f8f9;
+  --n-100: #f1f3f5;
+  --n-150: #eaecef;
+  --n-200: #d8dce1;
+  --n-300: #b9c0c8;
+  --n-400: #8b939c;
+  --n-500: #656d76;
+  --n-600: #4b535c;
+  --n-700: #3d444d;
+  --n-800: #262b31;
+  --n-850: #1d222a;
+  --n-900: #161a20;
+  --n-950: #0e1116;
+  --n-ink: #16191d;     /* light 主文本：比 --n-900 更黑一档，17.6:1 */
+
+  /* 深色主题专用中性阶。
+     深色模式不能简单反转 light 阶——反转后的浅灰在暗底上会过亮刺眼，
+     且层级要靠亮度递进而非阴影表达，所以单独标定一组。 */
+  --d-ink-1: #e8ebef;   /* 主文本 */
+  --d-ink-2: #c0c6ce;   /* 次级文本 */
+  --d-ink-3: #8e97a2;   /* 副文本 */
+  --d-ink-4: #6a737e;   /* 元数据 / 控件边界 */
+  --d-line:  #2a3038;   /* 分隔线 */
+  --d-grid:  #23282f;   /* 图表网格 */
+  --d-on-accent: #08101f;  /* accent 底上的前景（亮蓝底需深字） */
+
+  /* 强调蓝：钢蓝偏深，刻意避开 Tailwind indigo #6366f1 与 Vercel #0070f3 */
+  --b-50:  #e8f0fe;
+  --b-100: #cfe0fb;
+  --b-300: #6ba1ff;
+  --b-400: #4c8dff;
+  --b-600: #1957c8;
+  --b-700: #14499f;
+  --b-800: #103b80;
+
+  /* 语义原始色 */
+  --g-500: #3fbf7f;  /* ok · dark */
+  --g-700: #12724a;  /* ok · light */
+  --g-50:  #e3f4ea;
+  --a-500: #e0a32e;  /* warn · dark */
+  --a-700: #8a5a0b;  /* warn · light */
+  --a-50:  #fbf0dc;
+  --r-500: #f0666e;  /* danger · dark */
+  --r-700: #b01d26;  /* danger · light */
+  --r-50:  #fbe9e9;
+  --t-500: #46c2d2;  /* degraded · dark */
+  --t-700: #0d6b78;  /* degraded · light */
+  --t-50:  #e0f2f4;
+
+  /* ---------------------------------------------------------------------
+     A1 · primitive — 字体栈
+     零外链约束下不能 @import 网络字体，因此不追求"品牌字形"，
+     改为锁定一条受控的系统栈 + 显式排版契约（tabular-nums / 字距 / 三级字重）。
+     数字必须走 --font-mono 或 tabular-nums，否则表格列会跳动。
+     --------------------------------------------------------------------- */
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI",
+               "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+               "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono",
+               "Cascadia Mono", "Cascadia Code", "Roboto Mono", Consolas,
+               "Liberation Mono", Menlo, monospace;
+
+  /* 字号阶梯（受限 7 级，控制台正文 13px；再加一级仅用于 KPI 数字） */
+  --fs-micro: 11px;   /* 表头 ALL CAPS、徽章 */
+  --fs-cap:   12px;   /* 元数据、辅助说明 */
+  --fs-body:  13px;   /* 正文、表格单元、输入框（默认） */
+  --fs-lg:    14px;   /* 强调正文、卡片标题 */
+  --fs-title: 16px;   /* 面板标题 */
+  --fs-sec:   20px;   /* 页面标题 */
+  --fs-kpi:   28px;   /* KPI 数字 */
+
+  --lh-tight: 1.2;
+  --lh-body:  1.55;
+  --lh-flat:  1;
+
+  --fw-read: 400;
+  --fw-emph: 510;
+  --fw-anno: 590;
+
+  --ls-caps:  0.08em;   /* ALL CAPS 表头/徽章 */
+  --ls-micro: 0.01em;
+  --ls-body:  0;
+  --ls-title: -0.01em;
+  --ls-kpi:   -0.02em;
+
+  /* 间距：4px 网格 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* 圆角：控制台上限 12px，禁止 ≥16px 的"糖果角" */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-pill: 9999px;
+
+  /* 层级 */
+  --z-base: 0;
+  --z-sticky: 100;
+  --z-dropdown: 400;
+  --z-drawer: 600;
+  --z-modal: 800;
+  --z-toast: 900;
+
+  /* 动效：禁止弹跳缓动；三档时长收敛 */
+  --dur-1: 80ms;    /* 即时反馈：按下、勾选 */
+  --dur-2: 120ms;   /* 状态确认：hover、focus */
+  --dur-3: 180ms;   /* 进入：下拉、抽屉、Toast */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* 布局 */
+  --sidebar-w: 216px;
+  --sidebar-w-collapsed: 56px;
+  --topbar-h: 48px;
+  --content-max: 1440px;
+  --gutter: var(--sp-6);
+  --row-h: 36px;        /* 表格行高：密集但仍可点 */
+  --row-h-touch: 44px;  /* 触摸目标兜底 */
+  --tap-min: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   A2 · semantic — light（默认）
+   --------------------------------------------------------------------------- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --c-bg:          var(--n-50);
+  --c-surface:     var(--n-0);
+  --c-surface-2:   var(--n-100);   /* 表头、输入底、代码块 */
+  --c-surface-3:   var(--n-150);   /* hover 行、拖拽占位 */
+
+  --c-fg:          var(--n-ink);
+  --c-fg-2:        var(--n-700);
+  --c-muted:       var(--n-500);
+  --c-meta:        var(--n-400);
+  --c-disabled:    var(--n-300);
+
+  --c-border:      var(--n-200);
+  --c-border-soft: var(--n-150);
+  /* 注意：-strong 只是「比 --c-border 更明显的装饰线」（1.84:1 on #fff），
+     名字里的 strong 指视觉层级、不指对比度合规。仍属装饰性，
+     绝不可用于输入框/按钮/开关等靠边框识别的控件 —— 那类一律用 --c-border-field。 */
+  --c-border-strong: var(--n-300);
+  /* 交互控件边界必须 ≥3:1（WCAG 1.4.11）。
+     --c-border 是装饰性分隔线（1.38:1，不受该条约束）；
+     输入框、次级按钮、开关这类「靠边框才能被识别」的控件一律用 --c-border-field。 */
+  --c-border-field: var(--n-400);   /* 3.11:1 on #fff，实测值 */
+
+  --c-accent:       var(--b-600);
+  --c-accent-hover: var(--b-700);
+  --c-accent-active:var(--b-800);
+  --c-accent-on:    #ffffff;
+  --c-accent-soft:  var(--b-50);
+  --c-accent-line:  var(--b-100);
+
+  --c-ok:        var(--g-700);
+  --c-ok-soft:   var(--g-50);
+  --c-warn:      var(--a-700);
+  --c-warn-soft: var(--a-50);
+  --c-danger:    var(--r-700);
+  --c-danger-soft: var(--r-50);
+  --c-degraded:  var(--t-700);
+  --c-degraded-soft: var(--t-50);
+
+  /* 图表系列：先按语义分配（放行/拒绝/降级），第 4-5 位给多 biz 对比 */
+  --c-chart-1: var(--b-600);
+  --c-chart-2: var(--r-700);
+  --c-chart-3: var(--t-700);
+  --c-chart-4: var(--a-700);
+  --c-chart-5: var(--n-500);
+  --c-chart-grid: var(--n-150);
+  --c-chart-area: rgba(25, 87, 200, 0.10);
+  --c-chart-area-danger: rgba(176, 29, 38, 0.10);
+
+  --sh-ring:  0 0 0 1px var(--c-border);
+  --sh-sm:    0 1px 2px rgba(16, 24, 40, 0.06);
+  --sh-md:    0 4px 12px rgba(16, 24, 40, 0.10), 0 0 0 1px var(--c-border);
+  --sh-lg:    0 12px 32px rgba(16, 24, 40, 0.14), 0 0 0 1px var(--c-border);
+  --sh-focus: 0 0 0 2px var(--c-surface), 0 0 0 4px rgba(25, 87, 200, 0.40);
+  --sh-focus-danger: 0 0 0 2px var(--c-surface), 0 0 0 4px rgba(176, 29, 38, 0.35);
+}
+
+/* ---------------------------------------------------------------------------
+   A2 · semantic — dark（夜间 oncall）
+
+   这里刻意不写 @media (prefers-color-scheme: dark) 分支。
+   契约是：<head> 内联脚本在首次绘制前必须同步写入显式的 html[data-theme]
+   （值取 localStorage.unirate_theme，缺失时读 matchMedia 的系统偏好）。
+   见 DESIGN.md §9.2 —— 那段脚本本来就是防白闪的必需品，顺带让主题只剩
+   两个确定状态。若改成媒体查询 + 手动覆盖两条并存，dark 的值就得写两遍，
+   迟早漂移。
+   JS 失败时退化为 :root 的 light 默认值，仍可读。
+   --------------------------------------------------------------------------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --c-bg:          var(--n-950);
+  --c-surface:     var(--n-900);
+  --c-surface-2:   var(--n-850);
+  --c-surface-3:   var(--n-800);
+
+  --c-fg:          var(--d-ink-1);
+  --c-fg-2:        var(--d-ink-2);
+  --c-muted:       var(--d-ink-3);
+  --c-meta:        var(--d-ink-4);
+  --c-disabled:    var(--n-600);
+
+  --c-border:      var(--d-line);
+  --c-border-soft: rgba(255, 255, 255, 0.06);
+  /* 同 light：strong 指视觉层级不指对比度（1.77:1），仍属装饰线，不可用于控件 */
+  --c-border-strong: var(--n-700);
+  --c-border-field: var(--d-ink-4);   /* 3.63:1 on --n-900，实测值 */
+
+  --c-accent:       var(--b-400);
+  --c-accent-hover: var(--b-300);
+  --c-accent-active:var(--b-300);
+  --c-accent-on:    var(--d-on-accent);
+  --c-accent-soft:  rgba(76, 141, 255, 0.14);
+  --c-accent-line:  rgba(76, 141, 255, 0.32);
+
+  --c-ok:        var(--g-500);
+  --c-ok-soft:   rgba(63, 191, 127, 0.14);
+  --c-warn:      var(--a-500);
+  --c-warn-soft: rgba(224, 163, 46, 0.14);
+  --c-danger:    var(--r-500);
+  --c-danger-soft: rgba(240, 102, 110, 0.14);
+  --c-degraded:  var(--t-500);
+  --c-degraded-soft: rgba(70, 194, 210, 0.14);
+
+  --c-chart-1: var(--b-400);
+  --c-chart-2: var(--r-500);
+  --c-chart-3: var(--t-500);
+  --c-chart-4: var(--a-500);
+  --c-chart-5: var(--d-ink-3);
+  --c-chart-grid: var(--d-grid);
+  --c-chart-area: rgba(76, 141, 255, 0.16);
+  --c-chart-area-danger: rgba(240, 102, 110, 0.14);
+
+  --sh-ring:  0 0 0 1px var(--c-border);
+  --sh-sm:    0 1px 2px rgba(0, 0, 0, 0.40);
+  --sh-md:    0 4px 12px rgba(0, 0, 0, 0.50), 0 0 0 1px var(--c-border);
+  --sh-lg:    0 12px 32px rgba(0, 0, 0, 0.60), 0 0 0 1px var(--c-border);
+  --sh-focus: 0 0 0 2px var(--c-surface), 0 0 0 4px rgba(76, 141, 255, 0.45);
+  --sh-focus-danger: 0 0 0 2px var(--c-surface), 0 0 0 4px rgba(240, 102, 110, 0.40);
+}
