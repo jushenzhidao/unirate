@@ -83,6 +83,11 @@ func (s *Server) listBizs(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
+	// 迭代中途出错时 rows.Next() 同样返回 false，漏检会把部分结果当成全量返回
+	if err := rows.Err(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
 }
 

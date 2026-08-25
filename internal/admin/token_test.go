@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,7 @@ func TestEmptyAndBlankToken(t *testing.T) {
 		}
 	}
 	// 空值必须仍返回 ErrNoToken，main.go 与既有测试依赖该哨兵语义
-	if err := ValidateToken(""); err != ErrNoToken {
+	if err := ValidateToken(""); !errors.Is(err, ErrNoToken) {
 		t.Errorf("空令牌应返回 ErrNoToken 哨兵，实际 %v", err)
 	}
 }

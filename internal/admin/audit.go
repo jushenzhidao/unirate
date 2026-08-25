@@ -43,6 +43,12 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 			"remote_addr": remote, "detail": detail.String, "created_at": created,
 		})
 	}
+	// 迭代中途出错时 rows.Next() 也会返回 false，不检查 Err 会把
+	// 「查询失败」静默降级成「审计记录为空」——问责场景下这是最糟的失败模式
+	if err := rows.Err(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "count": len(out)})
 }
 

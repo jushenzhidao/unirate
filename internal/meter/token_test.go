@@ -76,8 +76,8 @@ func TestExtractUsage(t *testing.T) {
 
 func TestParseSSEData(t *testing.T) {
 	content, usage, has := ParseSSEData([]byte(`{"choices":[{"delta":{"content":"你好"}}]}`))
-	if content != "你好" || has {
-		t.Errorf("got (%q,%v)", content, has)
+	if content != "你好" || has || usage != 0 {
+		t.Errorf("got (%q,%d,%v)", content, usage, has)
 	}
 
 	// reasoning_content 也必须计入（推理模型会产生大量此类 token）

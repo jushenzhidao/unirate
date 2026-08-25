@@ -2,7 +2,7 @@
 # 注：未使用 `# syntax=docker/dockerfile:1` 与 cache mount。
 # BuildKit 的 cache mount 需要拉取外部 frontend 镜像，在受限网络下会直接失败。
 # 用「先 copy go.mod 再 download」的分层缓存即可获得等效的依赖缓存效果，且零外部依赖。
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH

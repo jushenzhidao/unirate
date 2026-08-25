@@ -539,12 +539,9 @@ func appendVia(dst http.Header, r *http.Request) {
 }
 
 func clientWantsStream(r *http.Request) bool {
-	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		return true
-	}
 	// OpenAI 兼容协议用 body 里的 "stream": true 表达，但读 body 会破坏透传，
 	// 因此只做保守判断：由 Accept 头或上游响应 Content-Type 决定。
-	return false
+	return strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 }
 
 func isJSON(h http.Header) bool {

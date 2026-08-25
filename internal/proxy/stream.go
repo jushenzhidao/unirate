@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -82,11 +83,11 @@ func copySSE(w http.ResponseWriter, body io.Reader, sink FrameSink, flushInterva
 		}
 
 		if err != nil {
-			if err == bufio.ErrBufferFull {
+			if errors.Is(err, bufio.ErrBufferFull) {
 				// 单行超过缓冲区：继续读剩余部分，不丢数据
 				continue
 			}
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				res.Err = err
 			}
 			break

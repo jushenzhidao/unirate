@@ -14,7 +14,9 @@ on:
         type: string
 
 env:
-  GO_VERSION: "1.22"
+  # 必须与 ci.yml 的 GO_VERSION 保持一致：verify job 复用 ci.yml，
+  # 若此处仍是旧版本，发布产物会用带已知漏洞的工具链构建。
+  GO_VERSION: "1.25"
   REGISTRY: ghcr.io
 
 concurrency:
