@@ -179,7 +179,7 @@ jobs:
           out="dist/unirate-gateway_${VERSION}_${GOOS}_${GOARCH}"
           mkdir -p "$out"
           go build -trimpath \
-            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA}" \
+            -ldflags "-s -w -X github.com/unirate/gateway/internal/config.buildVersion=${VERSION}" \
             -o "${out}/gateway" ./cmd/gateway
           cp README.md .env.example "${out}/"
           tar -czf "${out}.tar.gz" -C dist "$(basename "$out")"

@@ -21,3 +21,6 @@ coverage.html
 *.swp
 .idea/
 .vscode/
+
+# 本地 AI 助手工作区数据，不入库
+.workbuddy/

@@ -20,7 +20,8 @@ COPY . .
 
 # 静态链接 + 裁剪符号表，产物可直接跑在 scratch/distroless
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+    go build -trimpath \
+      -ldflags "-s -w -X github.com/unirate/gateway/internal/config.buildVersion=${VERSION}" \
       -o /out/gateway ./cmd/gateway && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w" \

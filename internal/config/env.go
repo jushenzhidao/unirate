@@ -10,6 +10,15 @@ import (
 // 运行时配置全部来自环境变量（12-Factor），避免再引入配置文件解析层。
 // 与「业务限流规则」区分开：规则是动态数据（MySQL SoT），这里是进程启动参数。
 
+// buildVersion 由构建期 ldflags 注入：
+//
+//	-X github.com/unirate/gateway/internal/config.buildVersion=v1.2.3
+//
+// 作为 VERSION 环境变量的默认值，环境变量仍可覆盖（本地调试用）。
+// 注入路径必须是本包的完整导入路径；写成 main.version 会因符号不存在
+// 而被链接器静默忽略，镜像里就永远是 dev。
+var buildVersion = "dev"
+
 // Runtime 进程级运行配置
 type Runtime struct {
 	ProxyAddr string
@@ -137,6 +146,6 @@ func LoadRuntime() *Runtime {
 		ConfigPollInterval: envDur("CONFIG_POLL_INTERVAL", 15*time.Second),
 		ShutdownGrace:      envDur("SHUTDOWN_GRACE", 30*time.Second),
 		LogLevel:           env("LOG_LEVEL", "info"),
-		Version:            env("VERSION", "dev"),
+		Version:            env("VERSION", buildVersion),
 	}
 }
