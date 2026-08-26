@@ -9,8 +9,16 @@ on:
     branches: [master, "release/**"]
   pull_request:
   workflow_dispatch:
-  # 供 release.yml 在打 tag 时复用，作为发布前的质量门禁
+  # 供 release.yml 复用，作为发布前的质量门禁
   workflow_call:
+    inputs:
+      # 由 release.yml 传入 true。为真时 build-image 只验证镜像能否构建，
+      # 不登录也不推送 —— 对外发布的镜像由 release.yml 的 packages job
+      # 独占产出，两边都推会重复构建多架构镜像，还会多出一个 :main tag。
+      release_gate:
+        required: false
+        default: false
+        type: boolean
 
 env:
   # 1.22 已停止安全维护，govulncheck 会报出大量永不修补的标准库漏洞。
@@ -196,8 +204,11 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      # 门禁模式下不登录：这一步只为验证镜像可构建，无需写权限。
+      # inputs.release_gate 在非 workflow_call 触发时求值为空串（假），
+      # 所以独立 CI 的行为不变。
       - name: 登录 GHCR
-        if: github.event_name != 'pull_request'
+        if: ${{ github.event_name != 'pull_request' && !inputs.release_gate }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -219,8 +230,12 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          # 门禁模式与 PR 一样只构建不推送。
+          # 注意 load 不能在多架构下开启（buildx 无法把多平台清单载入
+          # 本地 docker），因此门禁模式两者都为 false —— 构建成功本身
+          # 就是要验证的结论。
+          push: ${{ github.event_name != 'pull_request' && !inputs.release_gate }}
+          load: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |

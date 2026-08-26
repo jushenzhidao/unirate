@@ -130,6 +130,20 @@ jobs:
   verify:
     name: 发布前校验
     uses: ./.github/workflows/ci.yml
+    # 这段 permissions 不是冗余声明，缺了它整条流水线会在 1 秒内
+    # startup_failure（jobs 数为 0，没有任何日志可查）。
+    # 被调用工作流的权限只能在调用方的授权范围内收窄，不能放大：
+    # 仓库 default_workflow_permissions=read，而 ci.yml 的 build-image
+    # 声明了 packages: write，超出 verify 继承到的上限 → 作业图直接被拒。
+    # ci.yml 单独触发时不存在"调用方上限"这一层，所以那条链一直是绿的，
+    # 差异极易误判成 release.yml 语法问题（actionlint 也查不出来）。
+    permissions:
+      contents: read
+      packages: write
+    # 发布门禁只做校验，镜像发布由下方 packages job 独占，
+    # 否则同一份多架构镜像会构建两遍，并推出一个多余的 :main tag。
+    with:
+      release_gate: true
 
   binaries:
     name: 构建多平台二进制
