@@ -1,10 +1,18 @@
 name: Release
 
-# 仅由语义化 tag 触发。CI 负责"这次改动对不对"，
-# 本工作流负责"这个版本对外发什么"，两者刻意分开：
-# 发布链路失败不应该让日常 PR 变红，反之亦然。
+# 三种入口，共用同一条发布流水线：
+#   1. push 到 main —— 自动把最新 tag 的 patch 位 +1 并发布（日常主路径）
+#   2. push 语义化 tag —— 人工决定 minor/major 时使用，后续自增以此为新基线
+#   3. workflow_dispatch —— 补发或指定版本号
+#
+# 为什么不做成「main 推送 → 打 tag → 由 tag 触发本工作流」：
+# GITHUB_TOKEN 推送的 tag 不会触发任何 workflow，那条链会断在第二环。
+# 所以版本解析抽成 version job，由它统一喂给下游，tag 只是产物之一。
+#
+# CI 负责"这次改动对不对"，本工作流负责"这个版本对外发什么"。
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
@@ -19,20 +27,113 @@ env:
   GO_VERSION: "1.25"
   REGISTRY: ghcr.io
 
+# cancel-in-progress 必须为 false：发布过程被腰斩会留下
+# 「tag 已推、Release 未建」或「镜像已推、产物缺失」的半成品状态。
+# 并发的第二次 main 推送会排队等待，而不是抢占。
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # 复用 CI 的质量门禁。不加这一步的话，
-  # 直接对未过测的 commit 打 tag 就能发出去。
+  # 版本号是整条流水线的唯一事实来源。下游 job 一律读它的 output，
+  # 不再各自解析 GITHUB_REF —— main 推送时 ref 是分支名，
+  # docker/metadata-action 的 type=semver 在非 tag ref 上什么都产不出。
+  version:
+    name: 解析发布版本
+    # [skip release] 逃生阀：改 README、调 CI 这类提交不必发版本。
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip release]') }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      semver: ${{ steps.resolve.outputs.semver }}
+      minor: ${{ steps.resolve.outputs.minor }}
+      major: ${{ steps.resolve.outputs.major }}
+      prev: ${{ steps.resolve.outputs.prev }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
+    steps:
+      # fetch-depth: 0 不可省。默认浅克隆拿不到历史 tag，
+      # 版本号会永远从 v0.0.1 重新开始。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: resolve
+        run: |
+          set -euo pipefail
+
+          # 用 --sort=-v:refname 而非 git describe：后者取的是「最近可达的
+          # tag」，存在合并历史时会挑错版本。
+          all=$(git tag --list 'v*.*.*' --sort=-v:refname || true)
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.tag }}"
+          elif [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            version="${GITHUB_REF#refs/tags/}"
+          else
+            base=$(printf '%s\n' "$all" | head -n1)
+            base="${base:-v0.0.0}"
+            core="${base#v}"; core="${core%%-*}"
+            IFS=. read -r ma mi pa <<<"$core"
+            version="v${ma}.${mi}.$((pa + 1))"
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::版本号 ${version} 不符合 vMAJOR.MINOR.PATCH[-PRERELEASE]"
+            exit 1
+          fi
+
+          # tag 已存在则视为「重跑这个版本的发布」，不再重复创建。
+          if printf '%s\n' "$all" | grep -qx "$version"; then
+            create_tag=false
+          else
+            create_tag=true
+          fi
+
+          # 变更范围的起点：本次要发的版本自身必须排除，
+          # 否则 tag 重跑场景下 changelog 会算成空。
+          prev=$(printf '%s\n' "$all" | grep -vx "$version" | head -n1 || true)
+
+          semver="${version#v}"
+          core="${semver%%-*}"
+          IFS=. read -r ma mi pa <<<"$core"
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+
+          {
+            echo "version=${version}"
+            echo "semver=${semver}"
+            echo "minor=${ma}.${mi}"
+            echo "major=${ma}"
+            echo "prev=${prev}"
+            echo "prerelease=${prerelease}"
+            echo "create_tag=${create_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "上一版本 ${prev:-<无>} → 本次发布 ${version}（预发布=${prerelease}，需建 tag=${create_tag}）"
+          {
+            echo "### 准备发布 ${version}"
+            echo "- 上一版本：${prev:-无（首个发布）}"
+            echo "- 预发布：${prerelease}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # 复用 CI 的质量门禁。不加这一步的话，未过测的 commit 落到 main
+  # 就会被直接发出去，这比手动打 tag 的场景更危险 —— 无人复核。
+  #
+  # 刻意不写 needs: [version]：带 [skip release] 的提交会让 version 跳过，
+  # 若校验挂在它后面，这类提交就一行测试都不跑了。校验与版本解析并行，
+  # 发布开关只约束真正对外产出的 job。
+  # ci.yml 因此不再监听 main 推送 —— 否则每次推 main 会把 e2e、
+  # 多架构镜像、race 测试整套跑两遍。
   verify:
     name: 发布前校验
     uses: ./.github/workflows/ci.yml
 
   binaries:
     name: 构建多平台二进制
-    needs: [verify]
+    needs: [version, verify]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,24 +153,15 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: 解析版本号
-        id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            v="${{ inputs.tag }}"
-          else
-            v="${GITHUB_REF#refs/tags/}"
-          fi
-          echo "version=${v}" >> "$GITHUB_OUTPUT"
-
       # CGO_ENABLED=0 保证产物静态链接，可直接塞进 scratch/alpine 镜像
       - name: 交叉编译
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
+          set -euo pipefail
           out="dist/unirate-gateway_${VERSION}_${GOOS}_${GOARCH}"
           mkdir -p "$out"
           go build -trimpath \
@@ -87,7 +179,7 @@ jobs:
 
   packages:
     name: 发布镜像到 GHCR
-    needs: [verify]
+    needs: [version, verify]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,16 +199,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 刻意不用 metadata-action 的 type=semver：那些模式只在 tag ref 上
+      # 生效，而 main 推送时 ref 是 refs/heads/main，会产出空 tag 列表并
+      # 把镜像推成 :main。版本号一律取自 version job 的 output。
+      # latest 只在非预发布版本上移动，避免 v1.0.0-rc1 顶掉稳定版。
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
-          # latest 只在非预发布 tag 上移动，避免 v1.0.0-rc1 顶掉稳定版
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=${{ needs.version.outputs.semver }}
+            type=raw,value=${{ needs.version.outputs.minor }},enable=${{ needs.version.outputs.prerelease == 'false' }}
+            type=raw,value=${{ needs.version.outputs.major }},enable=${{ needs.version.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.prerelease == 'false' }}
 
       - id: build
         uses: docker/build-push-action@v6
@@ -129,7 +224,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ needs.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -143,7 +238,7 @@ jobs:
 
   release:
     name: 创建 GitHub Release
-    needs: [binaries, packages]
+    needs: [version, binaries, packages]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -161,23 +256,41 @@ jobs:
       - name: 生成校验和
         working-directory: dist
         run: |
+          set -euo pipefail
+          [ -n "$(ls -A .)" ] || { echo "::error::dist/ 为空，二进制产物未下载到"; exit 1; }
           sha256sum *.tar.gz > checksums.txt
           cat checksums.txt
 
-      - name: 汇总变更记录
-        id: notes
+      # tag 必须在 Release 之前落到远端：gh/action-gh-release 会以
+      # 已存在的 ref 为准，否则 Release 会挂在默认分支最新提交上，
+      # 与产物实际构建的 commit 未必一致。
+      - name: 创建版本 tag
+        if: ${{ needs.version.outputs.create_tag == 'true' }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$VERSION" -m "Release ${VERSION}"
+          git push origin "$VERSION"
+
+      - name: 汇总变更记录
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          PREV: ${{ needs.version.outputs.prev }}
+        run: |
+          set -euo pipefail
           {
             echo "## 镜像"
             echo '```'
-            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${GITHUB_REF_NAME#v}"
+            echo "docker pull ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.version.outputs.semver }}"
             echo "digest: ${{ needs.packages.outputs.digest }}"
             echo '```'
             echo
             echo "## 变更"
-            if [ -n "$prev" ]; then
-              git log --no-merges --pretty='- %s (%h)' "${prev}..${GITHUB_REF_NAME}"
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty='- %s (%h)' "${PREV}..${VERSION}"
             else
               echo "- 首个发布版本"
             fi
@@ -186,9 +299,25 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.version }}
+          name: ${{ needs.version.outputs.version }}
           body_path: notes.md
           files: |
             dist/*.tar.gz
             dist/checksums.txt
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
+
+      # 可变的 latest tag，方便下游用固定引用拉最新稳定版。
+      # 预发布版本不移动，否则 rc 会顶掉稳定版。
+      - name: 移动 latest tag
+        if: ${{ needs.version.outputs.prerelease == 'false' }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -f latest "$VERSION"
+          git push -f origin latest
+

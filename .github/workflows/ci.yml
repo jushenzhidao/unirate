@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, master, "release/**"]
+    # 刻意不含 main：main 的推送由 release.yml 触发，
+    # 它会通过 workflow_call 复用本文件作为发布前门禁。
+    # 若这里也监听 main，每次推送会把 race 测试、e2e、
+    # 多架构镜像整套跑两遍，且两条链的结论可能不一致。
+    branches: [master, "release/**"]
   pull_request:
   workflow_dispatch:
   # 供 release.yml 在打 tag 时复用，作为发布前的质量门禁
