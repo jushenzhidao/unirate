@@ -99,6 +99,14 @@ ADMIN_ALLOW_CIDRS=172.16.0.0/12,10.0.0.0/8,127.0.0.0/8,192.168.0.0/16
 # 这两项属 Tier 1，也可在管理页面热改（页面值优先于此处）。
 LOG_LEVEL=info
 VERSION=dev
+
+# ---- 镜像来源 ----
+# 默认本地构建（up -d --build）。想用 CI 发布到 GHCR 的预构建镜像，
+# 取消下面两行注释，再用 docker compose pull && docker compose up -d 启动
+# —— 此模式下不要带 --build，否则本地构建会覆盖刚拉下来的 tag。
+# 注意 GHCR 的语义化 tag 不带 v 前缀，写成 v0.1.4 会 404。
+# GATEWAY_IMAGE=ghcr.io/jushenzhidao/unirate:latest
+# GATEWAY_PULL_POLICY=always
 EOF
 
 chmod 600 "$ENV_FILE"

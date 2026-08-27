@@ -12,8 +12,20 @@
 # 占位默认值比"没有默认值"危险得多：它看起来像已经配好了，没人会去复查。
 # 降低部署门槛的正确做法是 `make init` 一键生成强随机凭证，而不是给默认值。
 #
-# 启动： make init && docker compose up -d --build
+# 启动（本地构建，默认）： make init && docker compose up -d --build
+# 启动（拉 GHCR 预构建镜像）：在 .env 设两项后 docker compose pull && docker compose up -d
+#   GATEWAY_IMAGE=ghcr.io/jushenzhidao/unirate:0.1.4
+#   GATEWAY_PULL_POLICY=always
+#   注意此模式下不要带 --build，否则仍会本地构建并覆盖同名 tag。
 # 验收： ./test/e2e/run.sh
+#
+# 为什么保留 build 段而不是直接把 image 换成 GHCR 地址：
+# ci.yml 的「启动完整栈」与 Makefile 的 up/build 目标都跑 `--build`，
+# 删掉 build 段这两条链会立刻报错。默认 GATEWAY_PULL_POLICY=build
+# 使行为与改动前完全一致；要用发布镜像只改 .env 两行，不动本文件。
+#
+# GHCR 语义化 tag 不带 v 前缀（release.yml 用的是去掉 v 的 semver 输出），
+# 写成 :v0.1.4 会 404。
 
 x-logging: &default-logging
   driver: json-file
@@ -77,7 +89,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: unirate/gateway:${VERSION:-dev}
+    # 与 gateway 复用同一镜像：Dockerfile 把 mockupstream 一起编进去了，
+    # 靠 entrypoint 切换入口即可，无需第二份镜像。
+    image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
+    pull_policy: ${GATEWAY_PULL_POLICY:-build}
     container_name: unirate-mock-upstream
     entrypoint: ["/usr/local/bin/mockupstream"]
     environment:
@@ -97,7 +112,8 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
-    image: unirate/gateway:${VERSION:-dev}
+    image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
+    pull_policy: ${GATEWAY_PULL_POLICY:-build}
     container_name: unirate-gateway
     depends_on:
       redis:
