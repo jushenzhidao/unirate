@@ -1,0 +1,122 @@
+# OpenTelemetry Collector —— UniRate 指标外发到 Logfire
+#
+# 设计取舍：Collector 旁路抓取，而非在网关内嵌 OTel SDK。
+#
+# 理由：internal/obs/metrics.go 顶部的决策是「不引入 prometheus/client_golang，
+# 自实现 200 行、零依赖」。往网关塞 OTel SDK 会引入一棵不小的依赖树，
+# 直接推翻那条决策，也扩大了供应链攻击面。而 /metrics 已经是标准
+# Prometheus text exposition format v0.0.4，Collector 能原样抓取，
+# 因此本方案的 Go 代码改动量为零。
+#
+# 代价：只有指标，没有 trace。单请求的完整链路（限流判定 → 上游转发 →
+# SSE 期间预扣 → 结束核销）仍然只能靠日志拼。若之后确实需要请求级链路，
+# 再单独评估把 SDK 引入网关的依赖代价——那是一次独立决策，不要顺手做掉。
+
+receivers:
+  prometheus:
+    config:
+      global:
+        scrape_interval: ${env:OTEL_SCRAPE_INTERVAL}
+        external_labels:
+          service: unirate
+          env: ${env:DEPLOY_ENV}
+      scrape_configs:
+        - job_name: unirate-gateway
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["gateway:9091"]
+              labels:
+                component: gateway
+
+          # 路径过滤（对应需求里的 EXCLUDED_URLS）。
+          #
+          # 注意语义边界：本网关的 /metrics 是**聚合快照**，不是按请求逐条上报，
+          # 健康检查根本不会在指标里产生独立时间序列，所以这里过滤的对象是
+          # **指标名**，而不是 HTTP 路径。真正需要按 URL 排除的是 trace，
+          # 而当前方案不采集 trace —— 因此 EXCLUDED_URLS 在本形态下的正确落点
+          # 就是下面 filter processor 的指标名白/黑名单。
+          metric_relabel_configs:
+            # 丢弃 Collector 自抓产生的元指标，避免与网关指标混在一个 job 里
+            - source_labels: [__name__]
+              regex: "scrape_.*|up"
+              action: drop
+
+processors:
+  # 内存保护必须放在最前：Logfire 不可达时 Collector 会积压，
+  # 没有这道闸会 OOM 拖垮同 host 的网关容器。
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  # 指标名过滤。EXCLUDED_URLS 的等价物 —— 见上方 receiver 注释里的语义说明。
+  # 默认排除进程自身噪音指标；业务指标全部保留。
+  filter/exclude:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'IsMatch(name, "^otelcol_.*")'
+
+  # 采样：指标是聚合值，逐点丢弃会直接破坏 counter 单调性，
+  # 使 rate() 出现负增长。因此**不对指标做概率采样**，
+  # 而是用抓取间隔控制数据量——这是指标场景下唯一正确的降频方式。
+  # OTEL_SCRAPE_INTERVAL 拉长即等效降采样。
+
+  resourcedetection:
+    detectors: [env, system]
+    system:
+      hostname_sources: ["os"]
+    timeout: 2s
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+exporters:
+  otlphttp/logfire:
+    endpoint: ${env:LOGFIRE_ENDPOINT}
+    headers:
+      # 用 ${env:VAR:?} 而非 ${env:VAR}：token 缺失时直接启动失败并报错，
+      # 而不是发出空 Authorization 头 —— 后者会让 Logfire 返回 401，
+      # Collector 无限重试，日志里只有重试噪音，属于典型静默失效。
+      # 校验放在这里而不是 compose 的变量插值层：插值发生在 profile 过滤
+      # 之前，写在那里会让未启用 logfire 的用户也无法执行任何 compose 命令。
+      Authorization: ${env:LOGFIRE_TOKEN:?LOGFIRE_TOKEN 未设置，请在 .env 中填入 Logfire write token}
+    compression: gzip
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 300s
+    # 队列落盘上限。Logfire 是 SaaS，网络抖动是常态，
+    # 但队列不能无界——无界队列在长时间断连下等于内存泄漏。
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 1000
+
+  # 排障用：设 OTEL_DEBUG_VERBOSITY=detailed 可在 Collector 日志里
+  # 看到实际抓到的指标，用于确认自研 exporter 的兼容性。
+  debug:
+    verbosity: ${env:OTEL_DEBUG_VERBOSITY}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors:
+        - memory_limiter
+        - filter/exclude
+        - resourcedetection
+        - batch
+      exporters: [otlphttp/logfire, debug]
+  telemetry:
+    logs:
+      level: ${env:OTEL_LOG_LEVEL}

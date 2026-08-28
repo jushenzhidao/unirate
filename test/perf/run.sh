@@ -88,7 +88,15 @@ if ! docker network inspect "$NET" >/dev/null 2>&1; then
 fi
 for c in unirate-gateway unirate-redis unirate-mock-upstream; do
   if ! docker ps --format '{{.Names}}' | grep -qx "$c"; then
-    echo "错误：容器 $c 未运行。请先 docker compose up -d" >&2
+    echo "错误：容器 $c 未运行。" >&2
+    # mock-upstream 是测试夹具，已移出主编排（生产不需要它）。
+    # 单独提示，否则只按 docker compose up 会永远起不来这个容器。
+    if [ "$c" = "unirate-mock-upstream" ]; then
+      echo "  该容器由测试 overlay 提供，请用：" >&2
+      echo "    docker compose -f docker-compose.yml -f docker-compose.test.yml up -d" >&2
+    else
+      echo "  请先 docker compose up -d" >&2
+    fi
     exit 1
   fi
 done

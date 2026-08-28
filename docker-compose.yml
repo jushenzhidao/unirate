@@ -2,7 +2,8 @@
 #
 # 安全设计要点：
 #   1. Admin 端口（9090）只绑定 127.0.0.1 且限制来源 CIDR，绝不对外暴露（评审 P0-3）；
-#   2. Redis 强制密码；MySQL 不映射到宿主，仅容器网络内可达；
+#   2. Redis 强制密码且不映射到宿主，仅容器网络内可达；配置 SoT 是网关
+#      进程内嵌的 SQLite，存放在命名卷 sqlite-data 中，无任何网络监听面；
 #   3. 网关以非 root 运行，只读根文件系统 + 丢弃全部 capabilities；
 #   4. 全部凭证用 ${VAR:?...} 声明为必填，**没有任何默认值**。
 #
@@ -60,51 +61,13 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  mysql:
-    image: mysql:8.0
-    container_name: unirate-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
-      MYSQL_DATABASE: unirate
-      MYSQL_USER: unirate
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --default-authentication-plugin=mysql_native_password
-    volumes:
-      - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - mysql-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 20s
-    networks: [unirate]
-    logging: *default-logging
-    restart: unless-stopped
-
-  mock-upstream:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    # 与 gateway 复用同一镜像：Dockerfile 把 mockupstream 一起编进去了，
-    # 靠 entrypoint 切换入口即可，无需第二份镜像。
-    image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
-    pull_policy: ${GATEWAY_PULL_POLICY:-build}
-    container_name: unirate-mock-upstream
-    entrypoint: ["/usr/local/bin/mockupstream"]
-    environment:
-      LISTEN_ADDR: ":9000"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/healthz"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [unirate]
-    logging: *default-logging
-    restart: unless-stopped
+  # MySQL 已移除。配置 SoT 改为网关进程内嵌的 SQLite（internal/store），
+  # 数据落在下方 sqlite-data 卷。默认编排从 3 个容器降到 2 个。
+  #
+  # 取舍：SQLite 是单写者，因此不能横向扩多个「写实例」——
+  # Admin 写入必须只有一个副本承担。这对本系统成立：配置写入是低频人工操作，
+  # 而限流判定完全走 Redis，与 SQLite 无关，因此代理面依然可以任意水平扩展。
+  # 若将来确实需要多副本同时写配置，那时才需要退回外置 RDBMS。
 
   gateway:
     build:
@@ -112,16 +75,15 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
+    # 文件头注释描述的「拉 GHCR 预构建镜像」用法依赖这一行：
+    # GATEWAY_IMAGE 此前只被 mock-upstream 引用，gateway 自身没有 image 字段，
+    # 因此把 mock 移出主编排后必须在此声明，否则该变量无人读取、用法失效。
     image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
     pull_policy: ${GATEWAY_PULL_POLICY:-build}
     container_name: unirate-gateway
     depends_on:
       redis:
         condition: service_healthy
-      mysql:
-        condition: service_healthy
-      mock-upstream:
-        condition: service_started
     environment:
       PROXY_ADDR: ":8080"
       OBS_ADDR: ":9091"
@@ -136,7 +98,9 @@ services:
       REDIS_POOL_SIZE: "256"
       REDIS_TIMEOUT: 200ms
 
-      MYSQL_DSN: unirate:${MYSQL_PASSWORD:?MYSQL_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}@tcp(mysql:3306)/unirate?parseTime=true&charset=utf8mb4&timeout=5s
+      # 配置 SoT：SQLite 单文件，落在 sqlite-data 卷。
+      # 容器 read_only: true，所以必须挂可写卷 —— 否则建表即失败。
+      STORE_DSN: /var/lib/unirate/unirate.db
 
       # 东八区：1d/1w 窗口按北京时间零点对齐
       TZ_OFFSET_SECONDS: "28800"
@@ -166,6 +130,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      # SQLite 数据目录。WAL 模式会额外产生 -wal 与 -shm 两个文件，
+      # 因此必须挂**目录**而非单个文件——挂文件会导致 WAL 无法创建。
+      - sqlite-data:/var/lib/unirate
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/live"]
       interval: 10s
@@ -177,11 +145,12 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    # 抓取配置与告警规则内置镜像（deploy/prometheus/Dockerfile）。
+    build:
+      context: ./deploy/prometheus
+    image: unirate/prometheus:${VERSION:-dev}
     container_name: unirate-prometheus
     volumes:
-      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./deploy/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
       - prom-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -196,7 +165,10 @@ services:
     profiles: [obs]
 
   grafana:
-    image: grafana/grafana:11.1.0
+    # 数据源、面板 provider 与面板 JSON 内置镜像（deploy/grafana/Dockerfile）。
+    build:
+      context: ./deploy/grafana
+    image: unirate/grafana:${VERSION:-dev}
     container_name: unirate-grafana
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
@@ -204,9 +176,6 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
-      - ./deploy/grafana/datasource.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
-      - ./deploy/grafana/dashboard-provider.yml:/etc/grafana/provisioning/dashboards/dp.yml:ro
-      - ./deploy/grafana/dashboard.json:/var/lib/grafana/dashboards/unirate.json:ro
       - grafana-data:/var/lib/grafana
     ports:
       - "${GRAFANA_PORT:-29093}:3000"
@@ -216,11 +185,58 @@ services:
     restart: unless-stopped
     profiles: [obs]
 
+  # Logfire 接入：Collector 旁路抓取 gateway:9091/metrics 转发到 Logfire。
+  # Go 代码零改动 —— /metrics 已是标准 Prometheus text exposition v0.0.4。
+  #
+  # 与 obs profile 并行存在，互不干扰：
+  #   docker compose --profile logfire up -d   # 只发 Logfire（1 个容器）
+  #   docker compose --profile obs up -d       # 只用本地 Prometheus+Grafana
+  # 两个 profile 同时开也可以，用于迁移期双跑比对。
+  #
+  # 迁移必办事项：deploy/prometheus/rules.yml 里的告警需在 Logfire 侧重建，
+  # 其中 RateLimiterDegraded（unirate_redis_breaker_open > 0）**必须保留**——
+  # 限流静默失效没有任何用户可见症状，丢了这条等于丢了最重要的告警。
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.115.1}
+    container_name: unirate-otel-collector
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./deploy/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+    environment:
+      # Logfire write token 属于 Tier 0 凭证：只从 .env 读取，绝不给默认值。
+      # 这里不能用 ${VAR:?err} 强制语法——compose 的变量插值发生在 profile
+      # 过滤之前，未设置会让所有 compose 命令失败，可选组件反而卡死整个栈。
+      # 缺失校验交给下面的 entrypoint，只在本服务真正启动时才生效。
+      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
+      # 美区 logfire-us / 欧区 logfire-eu，按账号所属区域选择
+      LOGFIRE_ENDPOINT: ${LOGFIRE_ENDPOINT:-https://logfire-us.pydantic.dev}
+      # 指标降频的唯一正确手段：拉长抓取间隔。
+      # 不要对指标做概率采样——会破坏 counter 单调性，令 rate() 出现负值。
+      OTEL_SCRAPE_INTERVAL: ${OTEL_SCRAPE_INTERVAL:-15s}
+      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:-warn}
+      OTEL_DEBUG_VERBOSITY: ${OTEL_DEBUG_VERBOSITY:-basic}
+      DEPLOY_ENV: ${DEPLOY_ENV:-dev}
+    depends_on: [gateway]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+    profiles: [logfire]
+
 networks:
   unirate:
     driver: bridge
 
 volumes:
-  mysql-data:
+  # SQLite 配置 SoT（替代原 mysql-data）
+  sqlite-data:
   prom-data:
   grafana-data:

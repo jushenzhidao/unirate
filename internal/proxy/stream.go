@@ -32,6 +32,16 @@ type sseCopyResult struct {
 	Bytes  int64
 	Frames int64
 	Err    error
+
+	// TTFT 从 copySSE 开始到**首个 data 行**被转发的耗时。
+	//
+	// 取 data 行而非响应头或首个任意行，是因为只有 data 才承载模型输出：
+	// 上游常先发 `event:`/`:ping` 心跳或 role 声明帧，以那些为基准会
+	// 系统性低估 TTFT，得到一个好看但无意义的数字。
+	//
+	// 零值表示整个流没有 data 行（如上游立即报错），调用方须据此跳过上报，
+	// 否则会把 0 混进直方图，把 P50 拉向 0。
+	TTFT time.Duration
 }
 
 // isSSE 判断响应是否为事件流
@@ -52,7 +62,8 @@ func copySSE(w http.ResponseWriter, body io.Reader, sink FrameSink, flushInterva
 	br := bufio.NewReaderSize(body, 16*1024)
 
 	var res sseCopyResult
-	lastFlush := time.Now()
+	streamStart := time.Now()
+	lastFlush := streamStart
 
 	for {
 		line, err := br.ReadSlice('\n')
@@ -71,8 +82,15 @@ func copySSE(w http.ResponseWriter, body io.Reader, sink FrameSink, flushInterva
 				res.Frames++
 			}
 
+			data, isData := stripDataPrefix(line)
+			// TTFT 在 Write 之后取样，度量的是「客户端已可见首字」而非
+			// 「网关已收到首字」—— 后者会漏掉下游写入本身的耗时。
+			if isData && res.TTFT == 0 {
+				res.TTFT = time.Since(streamStart)
+			}
+
 			if sink != nil {
-				if data, ok := stripDataPrefix(line); ok {
+				if isData {
 					sink.OnData(data)
 				}
 				if flushInterval > 0 && time.Since(lastFlush) >= flushInterval {

@@ -83,18 +83,19 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, txCtx, cancel, err := s.db.BeginWrite(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	defer cancel()
 	defer func() { _ = tx.Rollback() }()
 
 	for _, k := range sortedKeys(vals) {
-		if _, err := tx.ExecContext(r.Context(),
+		if _, err := tx.ExecContext(txCtx,
 			`INSERT INTO runtime_config (cfg_key, cfg_value, operator)
-			 VALUES (?, ?, ?)
-			 ON DUPLICATE KEY UPDATE cfg_value=VALUES(cfg_value), operator=VALUES(operator)`,
+			 VALUES (?, ?, ?)`+
+				s.db.UpsertSuffix([]string{"cfg_key"}, []string{"cfg_value", "operator"}),
 			k, vals[k], operatorOf(r, p.Operator),
 		); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -102,7 +103,7 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, k := range p.Reset {
-		if _, err := tx.ExecContext(r.Context(),
+		if _, err := tx.ExecContext(txCtx,
 			`DELETE FROM runtime_config WHERE cfg_key = ?`, k); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -111,7 +112,7 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 
 	// 审计与变更同事务：管理面无审计等于无问责
 	detail, _ := json.Marshal(map[string]any{"set": vals, "reset": p.Reset})
-	if err := s.audit(r, tx, "update_policy", "_", p.Operator, detail); err != nil {
+	if err := s.audit(txCtx, r, tx, "update_policy", "_", p.Operator, detail); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

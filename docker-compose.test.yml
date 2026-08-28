@@ -1,0 +1,71 @@
+# 测试专用叠加编排 —— 仅供 e2e 与压测使用，生产部署绝不加载本文件。
+#
+# 为什么单独一份而不是放主编排里加 profiles：
+#   mock-upstream 是测试夹具（cmd/mockupstream），生产环境上游是真实服务。
+#   若留在主编排里靠 profile 关闭，gateway 的 depends_on 仍会引用一个
+#   未激活的服务，部分 compose 版本据此直接报错；而且它会继续出现在
+#   `docker compose config` 输出中，让生产编排看起来带着测试组件。
+#   拆成 overlay 后主编排不含任何测试痕迹，依赖关系也在本文件内自洽。
+#
+# 用法（两文件都要显式指定，顺序不能反）：
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+# 或用 Makefile 封装好的目标：
+#   make e2e / make perf
+#
+# 注意：不加 -f docker-compose.test.yml 时 mock-upstream 不会启动，
+# e2e 与压测脚本的前置检查会直接失败并提示正确命令。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mock-upstream:
+    # 与 gateway 复用同一镜像：Dockerfile 把 mockupstream 一起编进去了，
+    # 靠 entrypoint 切换入口即可，无需第二份镜像。
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
+    pull_policy: ${GATEWAY_PULL_POLICY:-build}
+    container_name: unirate-mock-upstream
+    entrypoint: ["/usr/local/bin/mockupstream"]
+    environment:
+      LISTEN_ADDR: ":9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [unirate]
+    logging: *default-logging
+    restart: unless-stopped
+
+  # 叠加 gateway 的测试配置：种子数据 + mock-upstream 依赖。
+  #
+  # 种子数据机制的变化（原先靠一份测试专用 MySQL 镜像）：
+  #   SQLite 的库文件由 gateway 进程自己创建，没有 MySQL 官方镜像那种
+  #   /docker-entrypoint-initdb.d 初始化钩子。改为挂载 deploy/seed 并用
+  #   SEED_SQL_DIR 指路，gateway 建表后自行加载（internal/store/seed.go）。
+  #   种子 SQL 自带 ON CONFLICT upsert，重启重复执行是安全的 ——
+  #   不再需要先 docker compose down -v 清卷才能让 demo 生效。
+  #
+  # 生产编排既不挂载 deploy/seed 也不设 SEED_SQL_DIR，加载逻辑不可达。
+  #
+  # volumes 必须重复声明 sqlite-data：compose 的 volumes 是覆盖而非合并，
+  # 只写种子挂载会让 gateway 丢掉主编排的数据卷，DB 落进容器可写层。
+  gateway:
+    environment:
+      SEED_SQL_DIR: /etc/unirate/seed
+    volumes:
+      - sqlite-data:/var/lib/unirate
+      - ./deploy/seed:/etc/unirate/seed:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-upstream:
+        condition: service_started

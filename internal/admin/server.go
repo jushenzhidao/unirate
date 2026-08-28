@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -16,6 +15,7 @@ import (
 	"github.com/unirate/gateway/internal/config"
 	"github.com/unirate/gateway/internal/limiter"
 	"github.com/unirate/gateway/internal/obs"
+	storepkg "github.com/unirate/gateway/internal/store"
 )
 
 // Admin 管理面（对应评审 P0-3 修正）
@@ -48,7 +48,10 @@ type Options struct {
 
 // Server Admin 服务
 type Server struct {
-	db    *sql.DB
+	// db 携带方言信息（见 internal/store）。改用 *store.DB 而非裸 *sql.DB
+	// 的原因：两处 upsert 的冲突子句在 MySQL 与 SQLite 间语法不同，
+	// 把方言绑在句柄上可以让新增 upsert 的人无法忘记处理差异。
+	db    *storepkg.DB
 	store *config.Store
 	log   *slog.Logger
 	opt   Options
@@ -66,7 +69,7 @@ var ErrNoToken = fmt.Errorf(
 	"admin token is required; refusing to start an unauthenticated admin api. %s", GenerateHint)
 
 // New 创建 Admin 服务
-func New(db *sql.DB, store *config.Store, log *slog.Logger, opt Options) (*Server, error) {
+func New(db *storepkg.DB, store *config.Store, log *slog.Logger, opt Options) (*Server, error) {
 	// 令牌强度校验见 token.go：非空 + ≥32 字符 + 不在弱值黑名单。
 	// 光有长度检查挡不住仓库里的公开占位值 —— 那是本项目实测存在过的真实缺陷。
 	if err := ValidateToken(opt.Token); err != nil {

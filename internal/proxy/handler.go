@@ -279,7 +279,12 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, opt *Options,
 		client = h.sseClient
 	}
 
+	upstreamStart := time.Now()
 	resp, err := client.Do(req)
+	// 上游往返延迟与端到端延迟分开度量。两者之差即为网关自身开销
+	// （元数据提取 + 准入判定 + Redis 往返），是判断"慢在谁"的唯一依据。
+	// 流式请求这里只计到响应头，流体时长由 StreamDuration 单独承载。
+	h.met.UpstreamLat.Observe(time.Since(upstreamStart).Seconds(), rm.Biz)
 	if err != nil {
 		kind := "upstream_error"
 		code := http.StatusBadGateway
@@ -315,9 +320,20 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, opt *Options,
 		w.WriteHeader(resp.StatusCode)
 
 		h.met.SSEStreams.Add(1, rm.Biz)
+		streamStart := time.Now()
 		sink := h.newSSESink(rm.Biz, m, rules, mc, hasTokenRule)
 		res := copySSE(w, resp.Body, sink, opt.TokenFlushEvery)
 		h.met.SSEStreams.Add(-1, rm.Biz)
+
+		// TTFT 零值表示该流没有产出任何 data 行（上游立即失败或仅发心跳）。
+		// 上报 0 会把直方图 P50 拉向零，掩盖真实首字延迟，故必须跳过。
+		if res.TTFT > 0 {
+			h.met.TTFT.Observe(res.TTFT.Seconds(), rm.Biz)
+		}
+		h.met.StreamDuration.Observe(time.Since(streamStart).Seconds(), rm.Biz)
+		if res.Frames > 0 {
+			h.met.SSEFrames.Add(res.Frames, rm.Biz)
+		}
 
 		if res.Err != nil {
 			h.log.Warn("sse stream ended with error",
@@ -365,7 +381,11 @@ func (h *Handler) forwardJSONWithMetering(w http.ResponseWriter, resp *http.Resp
 		}
 	}
 	if !ok && (mc.Mode == "json_body" || mc.Mode == "auto") {
-		used, ok = meter.ExtractUsage(buf)
+		var bd meter.UsageBreakdown
+		if bd, ok = meter.ExtractUsageBreakdown(buf); ok {
+			used = bd.Total
+			h.countTokenKinds(rm.Biz, bd)
+		}
 	}
 	if !ok && mc.Mode != "disabled" {
 		// 上游未返回用量，退化为估算（带安全缓冲）
@@ -381,7 +401,7 @@ func (h *Handler) forwardJSONWithMetering(w http.ResponseWriter, resp *http.Resp
 			h.met.RedisErrors.Inc("token_reserve")
 		}
 		cancel()
-		h.met.TokenConsumed.Add(used, rm.Biz)
+		h.countTokens(rm.Biz, used)
 	}
 	h.observe(rm.Biz, "pass", resp.StatusCode, start)
 }
@@ -411,6 +431,11 @@ func (s *sseSink) OnData(data []byte) {
 	content, usage, hasUsage := meter.ParseSSEData(data)
 	if hasUsage {
 		s.c.SetExact(usage)
+		// SSE 是 LLM 流量的主形态，分项仅在 usage 帧出现一次；
+		// 漏掉这里会让 tokens_by_kind 在流式场景永久为空。
+		if bd, ok := meter.ExtractUsageBreakdown(data); ok {
+			s.h.countTokenKinds(s.biz, bd)
+		}
 	}
 	if content != "" {
 		s.c.AddEstimate(meter.EstimateTokens(content, s.mc.EstimateRatio))
@@ -431,7 +456,7 @@ func (s *sseSink) OnFlushTick() {
 		s.h.met.RedisErrors.Inc("token_reserve")
 		return
 	}
-	s.h.met.TokenConsumed.Add(delta, s.biz)
+	s.h.countTokens(s.biz, delta)
 }
 
 // OnEnd 流结束：用上游精确 usage 核销，退回多预扣的部分（评审 P0-6）
@@ -444,7 +469,7 @@ func (s *sseSink) OnEnd() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = s.h.lim.TokenReserve(ctx, s.rules, s.m, tail)
 		cancel()
-		s.h.met.TokenConsumed.Add(tail, s.biz)
+		s.h.countTokens(s.biz, tail)
 	}
 	actual := s.c.Final(s.mc.SafetyBuffer)
 	hasExact := s.c.HasExact()
@@ -516,6 +541,36 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request,
 func (h *Handler) observe(biz, decision string, code int, start time.Time) {
 	h.met.ReqTotal.Inc(biz, decision, strconv.Itoa(code))
 	h.met.Latency.Observe(time.Since(start).Seconds(), biz, decision)
+	// RPM 走滚动窗口，让控制台首屏即有速率值、且不受进程重启影响。
+	// 这里是所有请求路径的统一收口，放在别处会漏计。
+	h.met.RPM.Inc(biz)
+}
+
+// countTokens 统一的 token 观测收口。
+//
+// 单独提取而非在各调用点重复三行，是因为 TokenConsumed / TPM / TokensByKind
+// 必须同步更新 —— 漏掉任一处都会让看板上的用量与配额核对结果对不上，
+// 而这种不一致极难从现场反推。
+func (h *Handler) countTokens(biz string, n int64) {
+	if n <= 0 {
+		return
+	}
+	h.met.TokenConsumed.Add(n, biz)
+	h.met.TPM.Add(n, biz)
+}
+
+// countTokenKinds 记录分方向用量。仅在上游给出可信拆解时调用 ——
+// 用估算值伪造分项会让「补全占比」这类派生指标变成噪声。
+func (h *Handler) countTokenKinds(biz string, u meter.UsageBreakdown) {
+	if !u.Split {
+		return
+	}
+	if u.Prompt > 0 {
+		h.met.TokensByKind.Add(u.Prompt, biz, "prompt")
+	}
+	if u.Completion > 0 {
+		h.met.TokensByKind.Add(u.Completion, biz, "completion")
+	}
 }
 
 func copyHeaders(dst, src http.Header) {

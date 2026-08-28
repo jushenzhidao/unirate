@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +21,7 @@ import (
 	"github.com/unirate/gateway/internal/meta"
 	"github.com/unirate/gateway/internal/obs"
 	"github.com/unirate/gateway/internal/proxy"
+	"github.com/unirate/gateway/internal/store"
 	"github.com/unirate/gateway/internal/upstream"
 )
 
@@ -58,41 +58,82 @@ func run() error {
 		log.Info("redis connected", "addrs", rt.RedisAddrs)
 	}
 
-	var db *sql.DB
-	if rt.MySQLDSN != "" {
-		var err error
-		db, err = sql.Open("mysql", rt.MySQLDSN)
-		if err != nil {
-			return fmt.Errorf("open mysql: %w", err)
-		}
-		db.SetMaxOpenConns(16)
-		db.SetMaxIdleConns(8)
-		db.SetConnMaxLifetime(30 * time.Minute)
-		defer func() { _ = db.Close() }()
+	// 关系库默认 SQLite（嵌入进程，无外部依赖），DSN 形如 mysql://... 时切 MySQL。
+	// 与原实现的关键差异：DSN 为空不再降级为「只读 + 管理面禁用」，
+	// 而是落盘到本地 SQLite。原行为让默认部署失去配置写入能力，
+	// 这对一个需要配规则才能工作的网关是错误的默认值。
+	sdb, err := store.Open(rt.StoreDSN)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = sdb.Close() }()
 
-		dbCtx, dbCancel := context.WithTimeout(ctx, 10*time.Second)
-		if err := db.PingContext(dbCtx); err != nil {
-			log.Error("mysql unreachable at startup; will fall back to redis snapshot", "err", err)
-		} else {
-			log.Info("mysql connected")
+	// sotDown 表示启动时 SoT 已确认不可达（仅 MySQL 会走到这里，
+	// SQLite 不可用是直接 fatal）。后续建表与加载据此跳过。
+	sotDown := false
+
+	if err := sdb.Ping(ctx); err != nil {
+		// SQLite 打不开通常是目录权限或磁盘满，属于必须立刻暴露的部署错误；
+		// MySQL 不可达则可以靠 Redis 快照先服务存量配置。
+		if sdb.Kind == store.KindSQLite {
+			return fmt.Errorf("sqlite unusable (check volume permissions): %w", err)
 		}
-		dbCancel()
+		log.Error("sot database unreachable at startup; falling back to redis snapshot",
+			"kind", string(sdb.Kind), "err", err)
+		sotDown = true
 	} else {
-		log.Warn("MYSQL_DSN not set; config will be read from redis snapshot only")
+		log.Info("store connected", "kind", string(sdb.Kind))
 	}
 
-	store := config.NewStore(db, rdb, log)
-	defer store.Close()
+	// 幂等建表。SQLite 首次启动必须建表，否则管理面第一次写入即失败。
+	//
+	// 已知不可达时跳过：MySQL 抖动不应让进程退出，否则上面刚建立的
+	// 「靠 Redis 快照继续服务」降级路径会被这里的 return 抵消掉。
+	if !sotDown {
+		migCtx, migCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := sdb.Migrate(migCtx); err != nil {
+			migCancel()
+			if sdb.Kind == store.KindSQLite {
+				return fmt.Errorf("schema migrate: %w", err)
+			}
+			log.Error("schema migrate failed; continuing with redis snapshot", "err", err)
+		} else {
+			migCancel()
+
+			// 种子数据加载。仅当 SEED_SQL_DIR 显式设置时生效 ——
+			// 生产编排不设置该变量，测试编排挂载 deploy/seed。
+			//
+			// 替代了原 MySQL 镜像的 /docker-entrypoint-initdb.d 机制：
+			// SQLite 的库文件由本进程创建，没有第三方镜像的初始化钩子可用。
+			// 失败必须致命：种子加载不了意味着 e2e 断言的前置数据缺失，
+			// 静默跳过会让失败表现为「限流逻辑不对」，排查成本极高。
+			if dir := os.Getenv(store.SeedDirEnv); dir != "" {
+				seedCtx, seedCancel := context.WithTimeout(ctx, 30*time.Second)
+				err := sdb.LoadSeeds(seedCtx, dir)
+				seedCancel()
+				if err != nil {
+					return fmt.Errorf("load seeds from %s: %w", dir, err)
+				}
+				log.Info("seed data loaded", "dir", dir)
+			}
+		}
+	}
+
+	db := sdb.DB
+
+	cfgStore := config.NewStore(db, rdb, log)
+	cfgStore.SetDBKind(string(sdb.Kind))
+	defer cfgStore.Close()
 
 	// 环境变量层作为 Tier 1 策略的 base，必须在 Bootstrap 之前注入 ——
 	// 否则首次解析会以内置默认值为 base，环境变量在启动窗口内被忽略。
-	store.SetPolicyBase(config.PolicyFromEnv(rt))
+	cfgStore.SetPolicyBase(config.PolicyFromEnv(rt))
 
 	health := obs.NewHealth(rt.Version)
 	metrics := obs.NewMetrics()
 
 	bootCtx, bootCancel := context.WithTimeout(ctx, 15*time.Second)
-	bootErr := store.Bootstrap(bootCtx)
+	bootErr := cfgStore.Bootstrap(bootCtx)
 	bootCancel()
 	if bootErr != nil {
 		// 无配置无法路由，此时 /ready 保持 503，由编排层决定是否重启，
@@ -101,7 +142,7 @@ func run() error {
 	} else {
 		health.MarkReady()
 	}
-	store.Watch(ctx, rt.ConfigPollInterval)
+	cfgStore.Watch(ctx, rt.ConfigPollInterval)
 
 	lim := limiter.New(rdb, limiter.Options{
 		TZOffsetSeconds: rt.TZOffsetSeconds,
@@ -109,12 +150,12 @@ func run() error {
 		RedisTimeout:    rt.RedisTimeout,
 	})
 
-	go runtimeStateLoop(ctx, store, lim, health, metrics, log)
+	go runtimeStateLoop(ctx, cfgStore, lim, health, metrics, log)
 
 	policy := upstream.DefaultPolicy()
 	policy.AllowHeaderOverride = rt.AllowHeaderUpstream
 	policy.HostAllowlist = rt.UpstreamAllowlist
-	resolver := upstream.New(store, policy, "", "BIZ_")
+	resolver := upstream.New(cfgStore, policy, "", "BIZ_")
 	if rt.AllowHeaderUpstream {
 		log.Warn("ALLOW_HEADER_UPSTREAM is enabled; " +
 			"clients can direct traffic via X-Upstream-Base-URL (private targets are still blocked)")
@@ -136,12 +177,12 @@ func run() error {
 	popt.Instances = rt.Instances
 	popt.ExposeRuleName = rt.ExposeRuleName
 
-	ph := proxy.New(lim, store, resolver, metrics, log, popt)
+	ph := proxy.New(lim, cfgStore, resolver, metrics, log, popt)
 
 	// Tier 1 运行策略热更新：一处订阅，扇出到三个消费者。
 	// 注册时会立即回调一次当前值，因此启动即包含页面已有的覆盖项 ——
 	// 不需要在这里手动 apply 一遍，也就不会出现两处逻辑不一致。
-	store.OnPolicyChange(func(p *config.Policy) {
+	cfgStore.OnPolicyChange(func(p *config.Policy) {
 		ph.ApplyPolicy(p)
 		lim.SetInstances(p.Instances)
 		logLevel.Set(parseLevel(p.LogLevel))
@@ -149,8 +190,8 @@ func run() error {
 
 	health.BindRedis(func(c context.Context) error { return rdb.Ping(c).Err() })
 	health.BindConfig(func() (int64, bool, int) {
-		s := store.Current()
-		return s.Version, store.Degraded(), len(s.Bizs)
+		s := cfgStore.Current()
+		return s.Version, cfgStore.Degraded(), len(s.Bizs)
 	})
 	health.BindBreaker(lim.BreakerStats)
 
@@ -192,10 +233,11 @@ func run() error {
 		}
 	}()
 
+	// 管理面不再有条件启用：存储始终可用，配置写入能力是网关的基本功能。
 	var adminSrv *admin.Server
-	if db != nil {
+	{
 		var err error
-		adminSrv, err = admin.New(db, store, log, admin.Options{
+		adminSrv, err = admin.New(sdb, cfgStore, log, admin.Options{
 			Addr:       rt.AdminAddr,
 			Token:      rt.AdminToken,
 			AllowCIDRs: rt.AdminAllowCIDRs,
@@ -212,8 +254,6 @@ func run() error {
 				errCh <- fmt.Errorf("admin server: %w", err)
 			}
 		}()
-	} else {
-		log.Warn("admin api disabled: MYSQL_DSN is required for config writes")
 	}
 
 	select {
@@ -248,11 +288,11 @@ func run() error {
 // 「限流正在精确生效」与「限流已静默失效」，必须始终可观测，
 // 哪怕从未发生过故障也要输出 0，否则告警规则 (absent) 无法区分
 // 「指标缺失」和「一切正常」。
-func runtimeStateLoop(ctx context.Context, store *config.Store, lim *limiter.Limiter,
+func runtimeStateLoop(ctx context.Context, cfgStore *config.Store, lim *limiter.Limiter,
 	health *obs.Health, m *obs.Metrics, log *slog.Logger) {
 
 	sync := func() {
-		snap := store.Current()
+		snap := cfgStore.Current()
 		m.ConfigVersion.Set(snap.Version)
 
 		_, _, open := lim.BreakerStats()
@@ -275,10 +315,10 @@ func runtimeStateLoop(ctx context.Context, store *config.Store, lim *limiter.Lim
 			return
 		case <-t.C:
 			sync()
-			if !marked && len(store.Current().Bizs) > 0 {
+			if !marked && len(cfgStore.Current().Bizs) > 0 {
 				health.MarkReady()
 				marked = true
-				log.Info("config became available; marked ready", "version", store.Current().Version)
+				log.Info("config became available; marked ready", "version", cfgStore.Current().Version)
 			}
 		}
 	}

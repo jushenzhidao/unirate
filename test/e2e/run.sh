@@ -68,10 +68,22 @@ metric() {
 sect "前置检查"
 
 if ! curl -fsS "$OBS/live" >/dev/null 2>&1; then
-  printf '%s网关未运行%s，请先执行: docker compose up -d --build\n' "$c_r" "$c_0"
+  # 必须带 docker-compose.test.yml：mock-upstream 与 demo 种子数据都由它提供，
+  # 只起主编排会缺上游夹具，后续用例会大面积失败。
+  printf '%s网关未运行%s，请先执行:\n' "$c_r" "$c_0"
+  printf '  docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build\n'
   exit 1
 fi
 ok "网关存活 (/live)"
+
+# mock-upstream 是 e2e 的上游夹具，已移出主编排。这里显式探测，
+# 把"缺夹具"与"网关自身故障"区分开，避免后续断言失败时误判方向。
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx unirate-mock-upstream; then
+  printf '%smock-upstream 未运行%s，它由测试 overlay 提供，请执行:\n' "$c_r" "$c_0"
+  printf '  docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build\n'
+  exit 1
+fi
+ok "mock 上游存活"
 
 ready=$(curl -s -o /dev/null -w '%{http_code}' "$OBS/ready")
 assert_eq "200" "$ready" "网关就绪 (/ready)"

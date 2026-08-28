@@ -25,6 +25,13 @@
   var WINDOW = 60;   // 滚动窗口采样点数
   var BUCKETS = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30];
 
+  /* TTFT 与端到端延迟的桶边界不同，必须分别持有。
+     两者关注区间不重叠：延迟要覆盖 30s 长流，TTFT 的判别区间集中在 0.1~5s。
+     用 BUCKETS 去解析 TTFT 的 le 标签会导致大部分桶匹配不上（取到 0），
+     算出的分位数看起来是个正常数字，实际完全错误 —— 这类错误不会报错，
+     只会静默给出可信外观的假数据，所以必须与后端 obs.TTFTBounds 严格对齐。 */
+  var TTFT_BUCKETS = [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 20];
+
   /* ---- Prometheus 文本解析 ----
      行格式 name{k="v",...} value；跳过 # 开头行；无标签指标（如 uptime）也要支持。 */
   function parsePrometheus(text) {
@@ -95,32 +102,45 @@
      其真实不确定性是 ±1500ms —— 显示到 0.1ms 会暗示比实际高四个数量级的精度，
      而 SRE 会拿这个数字去对 SLO。所以把所在区间一并返回，由 UI 明示误差。
 
-     exact=true 仅当该分位恰好落在桶边界上（区间退化为一点），此时无插值误差。 */
-  function histQuantile(cumulative, q) {
+     exact=true 仅当该分位恰好落在桶边界上（区间退化为一点），此时无插值误差。
+
+     bounds 可选，默认为端到端延迟的 BUCKETS。TTFT 必须显式传 TTFT_BUCKETS —— 
+     桶边界与被解析的指标不匹配时结果是静默错误，不是异常。 */
+  function histQuantile(cumulative, q, bounds) {
+    var bk = bounds || BUCKETS;
     var total = cumulative.length ? cumulative[cumulative.length - 1] : 0;
     if (!(total > 0)) return null;
     var target = total * q;
     var prevCount = 0, prevBound = 0;
-    for (var i = 0; i < BUCKETS.length; i++) {
+    for (var i = 0; i < bk.length; i++) {
       var c = cumulative[i] || 0;
       if (c >= target) {
         var span = c - prevCount;
         if (span <= 0) {
           // 该桶内无样本增量，分位点就落在桶边界上，没有插值成分
-          return { value: BUCKETS[i], lo: BUCKETS[i], hi: BUCKETS[i], exact: true };
+          return { value: bk[i], lo: bk[i], hi: bk[i], exact: true };
         }
         var frac = (target - prevCount) / span;
         return {
-          value: prevBound + (BUCKETS[i] - prevBound) * frac,
-          lo: prevBound, hi: BUCKETS[i], exact: false
+          value: prevBound + (bk[i] - prevBound) * frac,
+          lo: prevBound, hi: bk[i], exact: false
         };
       }
       prevCount = c;
-      prevBound = BUCKETS[i];
+      prevBound = bk[i];
     }
     // 超出最后一个有限桶（落在 +Inf 桶）：只能给下界，上界未知
-    var last = BUCKETS[BUCKETS.length - 1];
+    var last = bk[bk.length - 1];
     return { value: last, lo: last, hi: Infinity, exact: false };
+  }
+
+  /* cumulativeOf —— 按给定桶边界提取累积桶计数。
+     le 标签的字符串形式必须与后端渲染完全一致，否则匹配不上会静默取 0。 */
+  function cumulativeOf(samples, bounds) {
+    return bounds.map(function (b) {
+      var key = String(b);
+      return sum(samples, function (l) { return l.le === key; });
+    });
   }
 
   /* ---- 状态机：持有基线与滚动窗口 ---- */
@@ -139,10 +159,7 @@
     var req = parsed['unirate_requests_total'] || [];
     var rej = parsed['unirate_rejected_total'] || [];
     var bucket = parsed['unirate_request_duration_seconds_bucket'] || [];
-    var cum = BUCKETS.map(function (b) {
-      var key = String(b);
-      return sum(bucket, function (l) { return l.le === key; });
-    });
+    var tokKind = parsed['unirate_tokens_by_kind_total'] || [];
     return {
       at: Date.now(),
       requests: sum(req),
@@ -152,7 +169,23 @@
       inFlight: sum(parsed['unirate_concurrency_in_flight']),
       breaker: sum(parsed['unirate_redis_breaker_open']),
       version: sum(parsed['unirate_config_version']),
-      buckets: cum,
+      buckets: cumulativeOf(bucket, BUCKETS),
+
+      // —— 新增指标 ——
+      // RPM/TPM 是后端滚动窗口 gauge，**不参与差分**：它们已经是速率，
+      // 再做一阶差分会得到「速率的变化量」，那是另一个物理量。
+      rpm: sum(parsed['unirate_requests_per_minute']),
+      tpm: sum(parsed['unirate_tokens_per_minute']),
+      rpmByBiz: groupSum(parsed['unirate_requests_per_minute'], 'biz'),
+      tpmByBiz: groupSum(parsed['unirate_tokens_per_minute'], 'biz'),
+
+      ttftBuckets: cumulativeOf(parsed['unirate_ttft_seconds_bucket'] || [], TTFT_BUCKETS),
+      ttftCount: sum(parsed['unirate_ttft_seconds_count']),
+      upstreamBuckets: cumulativeOf(parsed['unirate_upstream_duration_seconds_bucket'] || [], BUCKETS),
+      activeStreams: sum(parsed['unirate_sse_streams_active']),
+      sseFrames: sum(parsed['unirate_sse_frames_total']),
+      promptTokens: sum(tokKind, function (l) { return l.kind === 'prompt'; }),
+      completionTokens: sum(tokKind, function (l) { return l.kind === 'completion'; }),
       rejectByBiz: groupSum(rej, 'biz'),
       rejectRuleByBiz: (function () {
         var m = {};
@@ -192,22 +225,37 @@
 
     // 计数器回退 = 网关重启。丢弃该次采样并把新值当基线，
     // 否则 QPS 出现巨大负值尖刺。
-    if (dReq < 0 || dRej < 0 || dSettled < 0 || dDegraded < 0) {
+    // 新增的累计计数器同样要纳入判负，否则重启后派生速率出现负值尖刺。
+    // RPM/TPM/inFlight/activeStreams 是 gauge，本来就会降，不能参与此判断。
+    if (dReq < 0 || dRej < 0 || dSettled < 0 || dDegraded < 0 ||
+        cur.sseFrames < prev.sseFrames || cur.ttftCount < prev.ttftCount) {
       store.prev = cur;
       store.restarted = true;
       store.kpi = null;
       return false;
     }
 
-    var dBuckets = cur.buckets.map(function (v, i) {
-      var d = v - (prev.buckets[i] || 0);
-      return d < 0 ? 0 : d;
-    });
+    var diffBuckets = function (curB, prevB) {
+      return curB.map(function (v, i) {
+        var d = v - (prevB[i] || 0);
+        return d < 0 ? 0 : d;
+      });
+    };
+    var dBuckets = diffBuckets(cur.buckets, prev.buckets);
     store.buckets = dBuckets;
 
     var qps = dReq / dt;
     var rps = dRej / dt;
     var p99 = histQuantile(dBuckets, 0.99);
+
+    // TTFT 与上游延迟同样必须先差分再求分位，否则拿到的是进程启动至今的
+    // 全历史分位，故障期间会被历史数据稀释。桶边界各自传入，不能混用。
+    var dTtft = diffBuckets(cur.ttftBuckets, prev.ttftBuckets);
+    var dUp = diffBuckets(cur.upstreamBuckets, prev.upstreamBuckets);
+    var ttftP50 = histQuantile(dTtft, 0.50, TTFT_BUCKETS);
+    var ttftP95 = histQuantile(dTtft, 0.95, TTFT_BUCKETS);
+    var upP99 = histQuantile(dUp, 0.99);
+
     var prevKpi = store.kpi;
     store.kpi = {
       qps: qps,
@@ -222,7 +270,27 @@
       breaker: cur.breaker,
       version: cur.version,
       degradedGrowing: dDegraded > 0,
-      prev: prevKpi ? { qps: prevKpi.qps, rejectRate: prevKpi.rejectRate, p99ms: prevKpi.p99ms } : null
+
+      // RPM/TPM 直接取后端滚动窗口值，不做差分（它们已是速率）
+      rpm: cur.rpm,
+      tpm: cur.tpm,
+      rpmByBiz: cur.rpmByBiz,
+      tpmByBiz: cur.tpmByBiz,
+
+      ttftP50ms: ttftP50 === null ? null : ttftP50.value * 1000,
+      ttftP95ms: ttftP95 === null ? null : ttftP95.value * 1000,
+      ttftP95Range: ttftP95 === null ? null : {
+        lo: ttftP95.lo * 1000, hi: ttftP95.hi * 1000, exact: ttftP95.exact
+      },
+      upstreamP99ms: upP99 === null ? null : upP99.value * 1000,
+      activeStreams: cur.activeStreams,
+      framesPerSec: (cur.sseFrames - prev.sseFrames) / dt,
+      promptTokens: cur.promptTokens,
+      completionTokens: cur.completionTokens,
+      prev: prevKpi ? {
+        qps: prevKpi.qps, rejectRate: prevKpi.rejectRate, p99ms: prevKpi.p99ms,
+        rpm: prevKpi.rpm, tpm: prevKpi.tpm, ttftP95ms: prevKpi.ttftP95ms
+      } : null
     };
 
     push(store.series.pass, qps);
@@ -269,7 +337,9 @@
     createStore: createStore,
     ingest: ingest,
     fetchMetrics: fetchMetrics,
+    cumulativeOf: cumulativeOf,
     BUCKETS: BUCKETS,
+    TTFT_BUCKETS: TTFT_BUCKETS,
     WINDOW: WINDOW,
     endpointReady: function () { return ENDPOINT_READY; },
     endpointPath: function () { return ENDPOINT; }

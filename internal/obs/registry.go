@@ -24,6 +24,17 @@ import (
 // 否则给出的数字看起来精确却无法说明误差范围。
 var LatencyBounds = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
 
+// TTFTBounds 首字节时延（TTFT）的桶边界（秒）。
+//
+// 与 LatencyBounds 分开定义，因为两者的关注区间完全不同：
+// 端到端延迟需要覆盖到 30s 以上的长流，而 TTFT 的有效判别区间集中在
+// 0.1s~5s —— LLM 上游正常首字节在数百毫秒级，超过 5s 基本等同于不可用。
+// 复用 LatencyBounds 会把大部分观测值挤进 0.25~1 那两个桶，分位数失去分辨力。
+var TTFTBounds = []float64{0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 20}
+
+// StreamDurationBounds SSE 流总时长（秒）。长尾必须留足，长对话可达数分钟。
+var StreamDurationBounds = []float64{0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600}
+
 // Metrics 网关全部指标
 type Metrics struct {
 	ReqTotal      *counterVec
@@ -39,6 +50,22 @@ type Metrics struct {
 	BreakerOpen   *gaugeVec
 	ConfigVersion *gaugeVec
 	SSEStreams    *gaugeVec
+
+	// —— LLM 网关关键指标（本轮新增）——
+	//
+	// TTFT 只在流式请求上有定义：非流式响应的「首字节」等于整个响应，
+	// 与端到端延迟同义，混在一起会污染分位数。
+	TTFT           *histogramVec
+	UpstreamLat    *histogramVec
+	StreamDuration *histogramVec
+	// TokensByKind 按 prompt/completion 分方向计数。
+	// TokenConsumed 是预扣总量（用于配额核对），本指标是用量画像，两者用途不同。
+	TokensByKind *counterVec
+	SSEFrames    *counterVec
+
+	// RPM/TPM 走滚动窗口，理由见 window.go 顶部说明
+	RPM *rateVec
+	TPM *rateVec
 
 	startedAt time.Time
 }
@@ -72,6 +99,23 @@ func NewMetrics() *Metrics {
 			"Currently loaded config version."),
 		SSEStreams: newGaugeVec("sse_streams_active",
 			"Active server-sent-event streams being proxied.", "biz"),
+
+		TTFT: newHistogramVec("ttft_seconds",
+			"Time to first streamed byte, streaming requests only.", TTFTBounds, "biz"),
+		UpstreamLat: newHistogramVec("upstream_duration_seconds",
+			"Upstream round-trip latency, excluding gateway admission overhead.", LatencyBounds, "biz"),
+		StreamDuration: newHistogramVec("stream_duration_seconds",
+			"Total wall-clock duration of a proxied SSE stream.", StreamDurationBounds, "biz"),
+		TokensByKind: newCounterVec("tokens_by_kind_total",
+			"Tokens accounted, split by direction.", "biz", "kind"),
+		SSEFrames: newCounterVec("sse_frames_total",
+			"SSE frames forwarded downstream.", "biz"),
+
+		RPM: newRateVec("requests_per_minute",
+			"Requests observed over the trailing 60s window.", "biz"),
+		TPM: newRateVec("tokens_per_minute",
+			"Tokens accounted over the trailing 60s window.", "biz"),
+
 		startedAt: time.Now(),
 	}
 }
@@ -105,6 +149,13 @@ func (m *Metrics) Render() string {
 	m.BreakerOpen.write(&sb)
 	m.ConfigVersion.write(&sb)
 	m.SSEStreams.write(&sb)
+	m.TTFT.write(&sb)
+	m.UpstreamLat.write(&sb)
+	m.StreamDuration.write(&sb)
+	m.TokensByKind.write(&sb)
+	m.SSEFrames.write(&sb)
+	m.RPM.write(&sb)
+	m.TPM.write(&sb)
 
 	sb.WriteString("# HELP " + nsPrefix + "uptime_seconds Process uptime.\n")
 	sb.WriteString("# TYPE " + nsPrefix + "uptime_seconds gauge\n")

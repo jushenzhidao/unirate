@@ -1,7 +1,8 @@
 /* ============================================================================
    监控看板 #/monitor —— DESIGN.md §5.2
    ----------------------------------------------------------------------------
-   三段：KPI 条 / 主图区（放行·拒绝双序列 + 延迟直方图）/ 明细区（biz 拒绝 Top10 + 规则水位）
+   四段：KPI 条 / 主图区（放行·拒绝双序列 + 延迟直方图）/ 明细区（biz 拒绝 Top10 + 规则水位）
+   / 流量区（biz 的 RPM·TPM Top10）
    数据层走 Metrics.fetchMetrics()（可插拔，当前端点待接入）。
    错误时不清空画面 —— 故障中最后一帧数据往往最有价值。
    ========================================================================== */
@@ -140,6 +141,47 @@
     return U.el('div', { class: 'grid-2' }, [top, wm]);
   }
 
+  /* 按业务域的 RPM/TPM。RPM 与 TPM 量级差两三个数量级，同轴无法比较，
+     故按 RPM 排序、条形只表达 RPM 占比，TPM 以数值并列展示。 */
+  function trafficPanel() {
+    var k = store.kpi;
+    var panel = U.el('section', { class: 'panel' }, [
+      U.el('div', { class: 'panel-head' }, [
+        U.el('span', { class: 'panel-title', text: '按业务域的流量 Top 10' }),
+        U.el('span', { class: 'spacer' }),
+        U.el('span', { class: 'helper', text: '后端滚动窗口值，非采样差分' })
+      ])
+    ]);
+    var rows = [];
+    if (k && k.rpmByBiz) {
+      Object.keys(k.rpmByBiz).forEach(function (b) {
+        rows.push({ biz: b, rpm: k.rpmByBiz[b] || 0, tpm: (k.tpmByBiz || {})[b] || 0 });
+      });
+      rows.sort(function (a, b) { return b.rpm - a.rpm; });
+      rows = rows.slice(0, 10);
+    }
+    if (rows.length === 0) {
+      panel.appendChild(U.emptyBlock([U.el('span', { text: '窗口内暂无业务域流量样本' })]));
+      return panel;
+    }
+    var peak = rows[0].rpm || 1;
+    var body = U.el('div', { class: 'bars' });
+    rows.forEach(function (e) {
+      body.appendChild(U.el('button', {
+        class: 'bar-row', type: 'button',
+        'aria-label': '查看业务域 ' + e.biz + ' 的限流规则',
+        onclick: function () { location.hash = '#/rules?biz=' + encodeURIComponent(e.biz); }
+      }, [
+        U.el('span', { class: 'bar-name', text: e.biz, title: e.biz }),
+        C.hBar((e.rpm / peak) * 100),
+        U.el('span', { class: 'bar-num', text: U.compact(e.rpm) + ' req/min' }),
+        U.el('span', { class: 'bar-rule', text: U.compact(e.tpm) + ' tok/min' })
+      ]));
+    });
+    panel.appendChild(body);
+    return panel;
+  }
+
   function banner() {
     var out = [];
     if (!M.endpointReady()) {
@@ -223,7 +265,7 @@
       ]),
       toolbar(),
       U.el('div', { class: 'stack' }, banner().concat([
-        w.MonitorKPI.render(store, failStreak), mainCharts(), detailPanels()
+        w.MonitorKPI.render(store, failStreak), mainCharts(), detailPanels(), trafficPanel()
       ]))
     ]));
   }

@@ -126,7 +126,7 @@
       class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rl-t'
     }, [
       U.el('h2', { id: 'rl-t', text: '重新加载配置' }),
-      U.el('p', { class: 'helper', text: '将从 MySQL 重新读取全部业务域配置并发布到网关。当前版本 ' + snap.version + '。' }),
+      U.el('p', { class: 'helper', text: '将从配置库重新读取全部业务域配置并发布到网关。当前版本 ' + snap.version + '。' }),
       U.el('div', { class: 'modal-foot' }, [
         U.el('button', { class: 'btn btn--lg', type: 'button', text: '取消', onclick: function () { close(); } }),
         U.el('button', {

@@ -9,5 +9,8 @@ providers:
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:
-      path: /var/lib/grafana/dashboards
+      # 面板 JSON 内置于镜像的 /etc/grafana/dashboards。
+      # 不用 /var/lib/grafana/dashboards：该路径被命名卷 grafana-data 覆盖，
+      # 命名卷只在首次为空时从镜像播种，之后镜像内更新的面板不会再生效。
+      path: /etc/grafana/dashboards
       foldersFromFilesStructure: false

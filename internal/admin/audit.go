@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -53,7 +54,11 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 // audit 写审计日志。Spec 完全没提这个要求，但管理面无审计等于没有问责能力。
-func (s *Server) audit(r *http.Request, tx *sql.Tx, action, biz, operator string, detail []byte) error {
+//
+// ctx 必须是 store.BeginWrite 返回的事务 ctx，而不是 r.Context()：
+// 前者带 5s deadline，后者只在客户端断开时取消。用错会让审计写入
+// 逃出事务超时，单连接池下即退化为无上限阻塞。
+func (s *Server) audit(ctx context.Context, r *http.Request, tx *sql.Tx, action, biz, operator string, detail []byte) error {
 	if operator == "" {
 		operator = r.Header.Get("X-Operator")
 	}
@@ -68,7 +73,7 @@ func (s *Server) audit(r *http.Request, tx *sql.Tx, action, biz, operator string
 	if len(d) > 4000 {
 		d = d[:4000]
 	}
-	_, err = tx.ExecContext(r.Context(),
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO audit_log (action, biz, operator, remote_addr, detail)
 		 VALUES (?, ?, ?, ?, ?)`,
 		action, biz, operator, host, d)

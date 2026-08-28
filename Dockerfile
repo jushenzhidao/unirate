@@ -40,6 +40,12 @@ RUN apk add --no-cache ca-certificates tzdata curl && \
 COPY --from=builder /out/gateway /usr/local/bin/gateway
 COPY --from=builder /out/mockupstream /usr/local/bin/mockupstream
 
+# SQLite 数据目录必须在镜像里预建并 chown：
+# Docker 把空命名卷挂到镜像中已存在的路径时会继承该路径的 owner/mode，
+# 挂到不存在的路径则新建为 root:root —— 后者会让 UID 10001 无法建库，
+# 且失败点在 store.Open 建表时，不在启动早期，排查成本高。
+RUN mkdir -p /var/lib/unirate && chown 10001:10001 /var/lib/unirate
+
 # 非 root 运行
 USER 10001:10001
 

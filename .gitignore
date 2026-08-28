@@ -9,6 +9,13 @@ coverage.html
 .env
 .env.local
 
+# SQLite 本地数据：配置 SoT 与审计日志，含业务域名单
+# STORE_DSN 留空时落在 data/unirate.db；-wal/-shm 是 WAL 模式的侧车文件
+/data/
+*.db
+*.db-wal
+*.db-shm
+
 # 编译产物
 # 必须用 / 锚定到仓库根，否则会连带忽略 cmd/gateway、cmd/mockupstream 源码目录
 /bin/

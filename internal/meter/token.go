@@ -129,6 +129,46 @@ type usagePayload struct {
 	} `json:"usage"`
 }
 
+// UsageBreakdown token 用量分项。
+//
+// Prompt/Completion 可能为 0 而 Total 有值：部分上游只回总量。
+// 观测方必须区分「确实为 0」和「上游未提供」，否则分方向指标会凭空
+// 少掉一半用量，得出「补全 token 占比 100%」这类错误结论。
+type UsageBreakdown struct {
+	Prompt     int64
+	Completion int64
+	Total      int64
+	// Split 为 true 表示上游给出了可信的分项拆解。
+	Split bool
+}
+
+// ExtractUsageBreakdown 与 ExtractUsage 走同一份解析结果，但保留分项。
+//
+// 独立成函数而非改动 ExtractUsage 签名，是为了不动已有调用点与其测试：
+// 配额核对只关心总量，分项仅用于观测，两条用途不应互相牵连。
+func ExtractUsageBreakdown(body []byte) (UsageBreakdown, bool) {
+	var out UsageBreakdown
+	if !bytes.Contains(body, []byte(`"usage"`)) {
+		return out, false
+	}
+	var p usagePayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		return out, false
+	}
+	out.Prompt = p.Usage.PromptTokens
+	out.Completion = p.Usage.CompletionTokens
+	out.Split = out.Prompt > 0 || out.Completion > 0
+	switch {
+	case p.Usage.TotalTokens > 0:
+		out.Total = p.Usage.TotalTokens
+	case out.Split:
+		out.Total = out.Prompt + out.Completion
+	default:
+		return out, false
+	}
+	return out, true
+}
+
 // ExtractUsage 从 JSON 响应体提取 token 用量。
 // 只读取顶层 usage 字段，不解析 choices 等业务结构（保持透传语义）。
 func ExtractUsage(body []byte) (int64, bool) {

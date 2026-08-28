@@ -9,8 +9,17 @@
 ```bash
 cp .env.example .env      # 生产环境务必修改 ADMIN_TOKEN 与各密码
 docker compose up -d --build
-./test/e2e/run.sh         # 端到端验收
 ```
+
+主编排只含 `redis` / `mysql` / `gateway` 三个服务，不含任何测试组件，可直接用于生产部署。启动后通过 Admin API 注册真实上游业务域即可对外服务。
+
+跑端到端验收（需要额外的测试夹具）：
+
+```bash
+make e2e    # 等价于 down -v + 叠加 docker-compose.test.yml 启动 + 跑验收脚本
+```
+
+`docker-compose.test.yml` 提供两样仅测试需要的东西：模拟上游 `mock-upstream`（`cmd/mockupstream`）与 `demo` 演示业务域种子数据。不加载它时 `make e2e` 与压测会在前置检查处失败并给出正确命令。
 
 带监控栈启动：
 
@@ -19,7 +28,7 @@ docker compose --profile obs up -d
 # Grafana http://localhost:29093  Prometheus http://localhost:29092
 ```
 
-调用方式：
+调用方式（`demo` 业务域由测试栈提供，生产环境请替换为自己注册的业务域）：
 
 ```bash
 # 原始调用            http://api.example.com/v1/chat/completions

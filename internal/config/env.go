@@ -31,7 +31,10 @@ type Runtime struct {
 	RedisPoolSize int
 	RedisTimeout  time.Duration
 
-	MySQLDSN string
+	// StoreDSN 关系库位置。空值 → 本地 SQLite（data/unirate.db）。
+	// 形如 user:pass@tcp(host:3306)/db 或 mysql://... → MySQL。
+	// 兼容读取旧的 MYSQL_DSN，因为它在现有 .env 与部署文档中已被使用。
+	StoreDSN string
 
 	AdminToken      string
 	AdminAllowCIDRs []string
@@ -62,6 +65,15 @@ func env(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envInt(k string, def int) int {
@@ -123,7 +135,9 @@ func LoadRuntime() *Runtime {
 		RedisPoolSize: envInt("REDIS_POOL_SIZE", 256),
 		RedisTimeout:  envDur("REDIS_TIMEOUT", 200*time.Millisecond),
 
-		MySQLDSN: os.Getenv("MYSQL_DSN"),
+		// STORE_DSN 为空时由 store.Open 落到本地 SQLite 默认路径；
+		// 兼容读取旧的 MYSQL_DSN 只是为了让存量 .env 不静默失效
+		StoreDSN: firstNonEmpty(os.Getenv("STORE_DSN"), os.Getenv("MYSQL_DSN")),
 
 		AdminToken:      os.Getenv("ADMIN_TOKEN"),
 		AdminAllowCIDRs: envList("ADMIN_ALLOW_CIDRS", nil),

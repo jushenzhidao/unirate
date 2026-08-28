@@ -2,8 +2,11 @@ package adminui
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/unirate/gateway/internal/obs"
 )
 
 // 指标适配层的契约守护。
@@ -93,7 +96,7 @@ func TestRateRequiresDivisionByInterval(t *testing.T) {
 // 比真实分辨率高四个数量级，而 SRE 会拿它对 SLO。
 func TestQuantileReturnsBucketRange(t *testing.T) {
 	src := metricsSrc(t)
-	if !regexp.MustCompile(`lo:\s*prevBound,\s*hi:\s*BUCKETS\[i\]`).MatchString(src) {
+	if !regexp.MustCompile(`lo:\s*prevBound,\s*hi:\s*bk\[i\]`).MatchString(src) {
 		t.Error("histQuantile 未返回所在桶区间 —— UI 无法表达真实分辨率")
 	}
 	if !strings.Contains(src, "exact: true") {
@@ -111,6 +114,109 @@ func TestQuantileReturnsBucketRange(t *testing.T) {
 	}
 	if !strings.Contains(kpi, "桶区间") {
 		t.Error("KPI 卡未显示桶区间标注，用户看不到该数值的真实分辨率")
+	}
+}
+
+// TestHistogramBucketLabelsMatchBackend le 标签的字符串形式必须跨语言一致。
+//
+// 后端用 strconv.FormatFloat(bound, 'g', -1, 64) 渲染 le 标签，前端用
+// String(b) 生成查找键。两者恰好一致（都给最短往返表示），但这是巧合而非
+// 契约：换成 %v、%.1f 或在 JS 侧用 toFixed，键就匹配不上了。
+//
+// 匹配不上的后果是 cumulativeOf 全取 0 → histQuantile 因 total<=0 返回
+// null → KPI 卡显示「—」。整条链路不抛任何错误，看起来就像「没有流量」。
+// 这类沉默失效正是本文件存在的理由，所以在这里把它钉死。
+func TestHistogramBucketLabelsMatchBackend(t *testing.T) {
+	// 直接取后端真实边界，而不是手写样本 —— 后端加桶时这条测试要自动覆盖到
+	var bounds []float64
+	bounds = append(bounds, obs.LatencyBounds...)
+	bounds = append(bounds, obs.TTFTBounds...)
+	for _, b := range bounds {
+		got := strconv.FormatFloat(b, 'g', -1, 64)
+		// JS String(Number) 的等价形式：无小数则无 .0，无指数（这些量级下）
+		want := jsNumberString(b)
+		if got != want {
+			t.Errorf("le 标签跨语言不一致: Go=%q JS=%q（前端会静默取 0 → KPI 显示「—」）", got, want)
+		}
+	}
+	// 前端桶边界字面量必须与后端逐值一致。后端改了桶而前端没跟，
+	// cumulativeOf 对不上的那几档直接取 0，分位数偏低但仍是个「合理」数字。
+	lit := stripJSComments(string(newH(t).files["metrics.js"]))
+	assertBucketLiteral(t, lit, "TTFT_BUCKETS", obs.TTFTBounds)
+	assertBucketLiteral(t, lit, "BUCKETS", obs.LatencyBounds)
+
+	// 前端必须为 TTFT 显式传入 TTFT_BUCKETS：桶边界与指标不匹配是静默错误
+	src := metricsSrc(t)
+	if !regexp.MustCompile(`(?i)histQuantile\([^)]*ttft[^)]*TTFT_BUCKETS`).MatchString(src) {
+		t.Error("TTFT 分位数未显式传 TTFT_BUCKETS —— 会用端到端桶边界解析，结果静默错误")
+	}
+	if !strings.Contains(src, "bounds || BUCKETS") {
+		t.Error("histQuantile 未保留 bounds 默认值 —— 既有调用点会拿到 undefined 桶")
+	}
+}
+
+// assertBucketLiteral 校验 JS 里的桶边界数组字面量与后端 bounds 逐值一致。
+func assertBucketLiteral(t *testing.T, src, name string, want []float64) {
+	t.Helper()
+	// 匹配 var NAME = [ ... ];  —— 用 \b 避免 BUCKETS 误匹配 TTFT_BUCKETS
+	re := regexp.MustCompile(`(?:^|[^_\w])` + name + `\s*=\s*\[([^\]]*)\]`)
+	m := re.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("未在 metrics.js 找到 %s 的数组字面量定义", name)
+	}
+	var got []string
+	for _, p := range strings.Split(m[1], ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			got = append(got, p)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s 桶数量与后端不一致: JS=%d 后端=%d（对不上的档位会静默取 0）",
+			name, len(got), len(want))
+	}
+	for i, w := range want {
+		if exp := strconv.FormatFloat(w, 'g', -1, 64); got[i] != exp {
+			t.Errorf("%s[%d] 与后端不一致: JS=%q 后端=%q", name, i, got[i], exp)
+		}
+	}
+}
+
+// jsNumberString 复现 JS String(Number) 在测试所涉量级下的输出。
+func jsNumberString(f float64) string {
+	s := strconv.FormatFloat(f, 'g', -1, 64)
+	// Go 的 'g' 在 |exp| 较大时用 e 记法，JS 阈值不同；本用例区间内两者一致，
+	// 若未来加入极端量级的桶边界，这里会先失败，提示需要重新对齐格式。
+	if strings.ContainsAny(s, "eE") {
+		return "«需要重新对齐: " + s + "»"
+	}
+	return s
+}
+
+// TestGaugeMetricsAreNotDifferentiated RPM/TPM 是 gauge，禁止参与差分。
+//
+// 后端已在滚动窗口内算好「每分钟」值，前端再对它做 (cur-prev)/dt 会得到
+// 「每分钟值的变化速率」—— 稳态流量下恒为 0，看板会显示「零流量」。
+// 反过来若把 counter 当 gauge 直接显示，会把进程累计值当成瞬时值。
+// 两个方向都不报错，只是数字变成谎话。
+func TestGaugeMetricsAreNotDifferentiated(t *testing.T) {
+	src := metricsSrc(t)
+	// rpm/tpm 必须直取当前值，不得出现 dRpm / dt 这类差分
+	if regexp.MustCompile(`d(Rpm|Tpm|RPM|TPM)\s*/\s*dt`).MatchString(src) {
+		t.Error("对 RPM/TPM gauge 做了速率差分 —— 稳态流量下会恒显示 0")
+	}
+	if !regexp.MustCompile(`rpm:\s*cur\.rpm`).MatchString(src) {
+		t.Error("RPM 未直取 gauge 当前值")
+	}
+	if !regexp.MustCompile(`tpm:\s*cur\.tpm`).MatchString(src) {
+		t.Error("TPM 未直取 gauge 当前值")
+	}
+	// 新增的 sseFrames / ttftCount 都是 counter，必须纳入重启检测，
+	// 否则重启后 framesPerSec 出负尖刺、TTFT 用到负样本数
+	if !strings.Contains(src, "cur.sseFrames < prev.sseFrames") {
+		t.Error("sseFrames counter 未纳入重启检测 —— 网关重启后帧率会出现负尖刺")
+	}
+	if !strings.Contains(src, "cur.ttftCount < prev.ttftCount") {
+		t.Error("ttftCount counter 未纳入重启检测 —— TTFT 分位数会用到负样本数")
 	}
 }
 
@@ -153,5 +259,23 @@ func TestTopRejectRowNavigatesToRules(t *testing.T) {
 	}
 	if !strings.Contains(src, "encodeURIComponent") {
 		t.Error("biz 名未做 URL 编码 —— 含特殊字符的 biz 名会拼出错误路由")
+	}
+}
+
+// TestTrafficPanelBarScaleMatchesSortKey 流量面板的条形基准必须与排序键一致。
+//
+// RPM 与 TPM 差两三个数量级。面板按 rpm 降序取 Top10，条形宽度也必须以
+// rows[0].rpm 为 peak。若有人把排序换成 tpm 却漏改 peak（或反之），
+// 首行不再是最长条、宽度与数值失去对应关系 —— 图形在说谎，但不报任何错。
+func TestTrafficPanelBarScaleMatchesSortKey(t *testing.T) {
+	src := stripJSCode(string(newH(t).files["page-monitor.js"]))
+	if !regexp.MustCompile(`rows\.sort\([\s\S]{0,40}?return\s+b\.rpm\s*-\s*a\.rpm`).MatchString(src) {
+		t.Error("流量面板未按 rpm 降序排序")
+	}
+	if !regexp.MustCompile(`peak\s*=\s*rows\[0\]\.rpm`).MatchString(src) {
+		t.Error("条形 peak 未取 rows[0].rpm —— 与排序键不一致时条形宽度失去意义")
+	}
+	if !regexp.MustCompile(`e\.rpm\s*/\s*peak`).MatchString(src) {
+		t.Error("条形宽度未以 rpm/peak 计算")
 	}
 }

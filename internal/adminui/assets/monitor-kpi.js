@@ -51,25 +51,28 @@
      对 SLO，给假精度比给区间更危险。
      
      所以：有效数字按所在桶的宽度给（宽桶只给整数位），并在卡片上标出区间。 */
-  function p99Text(k) {
-    if (k.p99ms === null || k.p99ms === undefined) return null;
-    var r = k.p99Range;
-    if (!r) return U.num(k.p99ms, 1);
-    if (r.exact) return U.num(k.p99ms, r.hi < 10 ? 1 : 0);
+  /* 泛化为 (值, 区间) 两参数：TTFT 与 P99 的桶边界不同但显示规则完全一致，
+     复制一份会导致两处独立演化 —— 后加的指标很容易漏掉降精度处理。 */
+  function quantText(ms, r) {
+    if (ms === null || ms === undefined) return null;
+    if (!r) return U.num(ms, 1);
+    if (r.exact) return U.num(ms, r.hi < 10 ? 1 : 0);
     if (!isFinite(r.hi)) return '>' + U.num(r.lo, 0);
     // 桶越宽，小数位越无意义
     var width = r.hi - r.lo;
-    return U.num(k.p99ms, width >= 100 ? 0 : width >= 10 ? 0 : 1);
+    return U.num(ms, width >= 10 ? 0 : 1);
   }
 
-  function p99Note(k) {
-    var r = k.p99Range;
-    if (!r || k.p99ms === null) return null;
+  function quantNote(ms, r) {
+    if (!r || ms === null || ms === undefined) return null;
     if (r.exact) return null;
     if (!isFinite(r.hi)) return '超出最大桶 ' + U.num(r.lo, 0) + 'ms';
     // 明示真实分辨率：这个值只能确定在哪个桶内
     return '桶区间 ' + U.num(r.lo, 0) + '–' + U.num(r.hi, 0) + 'ms';
   }
+
+  function p99Text(k) { return quantText(k.p99ms, k.p99Range); }
+  function p99Note(k) { return quantNote(k.p99ms, k.p99Range); }
 
   function deltaOf(cur, prev, unit, digits) {
     if (cur === null || prev === null || cur === undefined || prev === undefined) return null;
@@ -84,7 +87,8 @@
 
   function skeleton() {
     var grid = U.el('div', { class: 'grid-kpi' });
-    for (var i = 0; i < 6; i++) {
+    // 与 render 的卡片数保持一致，否则首帧到数据帧会发生布局跳变
+    for (var i = 0; i < 10; i++) {
       grid.appendChild(U.el('article', { class: 'kpi' }, [
         U.el('span', { class: 'skel', style: 'width:38%' }),
         U.el('span', { class: 'skel', style: 'width:60%; height:28px' }),
@@ -121,6 +125,10 @@
     var rejState = k.rejectRate >= 5 ? 'failed' : k.rejectRate >= 1 ? 'warning' : null;
     var p99State = k.p99ms === null ? null
       : k.p99ms >= 3000 ? 'failed' : k.p99ms >= 1000 ? 'warning' : null;
+    // TTFT 阈值独立于 P99：LLM 场景下首字节 >2s 用户已明显感知等待，
+    // 而端到端 2s 对长回答完全正常。用同一套阈值会得出相反的结论。
+    var ttftState = k.ttftP95ms === null ? null
+      : k.ttftP95ms >= 5000 ? 'failed' : k.ttftP95ms >= 2000 ? 'warning' : null;
     var prev = k.prev;
 
     U.append(grid, [
@@ -146,8 +154,33 @@
         note: p99Note(k)
       }),
       card({
+        label: 'TTFT P95', icon: 'i-latency',
+        value: quantText(k.ttftP95ms, k.ttftP95Range),
+        unit: k.ttftP95ms === null ? '' : ' ms',
+        state: ttftState, stale: stale,
+        delta: prev && prev.ttftP95ms !== null && prev.ttftP95ms !== undefined
+          && k.ttftP95ms !== null ? deltaOf(k.ttftP95ms, prev.ttftP95ms, 'ms', 0) : null,
+        // 无流式请求时 TTFT 无观测值，明示原因而不是让卡片空着看似故障
+        note: k.ttftP95ms === null ? '窗口内无流式请求' : quantNote(k.ttftP95ms, k.ttftP95Range)
+      }),
+      card({
+        label: 'RPM', icon: 'i-nav-monitor',
+        value: U.compact(k.rpm), unit: ' req/min', stale: stale,
+        delta: prev ? deltaOf(k.rpm, prev.rpm, '', 0) : null
+      }),
+      card({
+        label: 'TPM', icon: 'i-token',
+        value: U.compact(k.tpm), unit: ' tok/min', stale: stale,
+        delta: prev ? deltaOf(k.tpm, prev.tpm, '', 0) : null
+      }),
+      card({
         label: 'Token 消耗', icon: 'i-token',
         value: U.compact(k.tokensPerSec), unit: ' tok/s', stale: stale
+      }),
+      card({
+        label: '活跃流', icon: 'i-rule-concurrency',
+        value: U.compact(k.activeStreams), unit: ' 个', stale: stale,
+        note: k.framesPerSec > 0 ? U.compact(k.framesPerSec) + ' 帧/s' : null
       }),
       card({
         label: '当前并发', icon: 'i-rule-concurrency',

@@ -86,6 +86,10 @@ type Store struct {
 	rdb redis.UniversalClient
 	log *slog.Logger
 
+	// dbKind 仅用于日志可读性（"sqlite" / "mysql"）。
+	// 空值时日志退化为中性的 "sot"，不影响任何行为。
+	dbKind string
+
 	cur atomic.Pointer[Snapshot]
 	pol policyState
 
@@ -102,6 +106,18 @@ func NewStore(db *sql.DB, rdb redis.UniversalClient, log *slog.Logger) *Store {
 	s.pol.base.Store(DefaultPolicy())
 	s.pol.eff.Store(DefaultPolicy())
 	return s
+}
+
+// SetDBKind 标注底层 SoT 的类型，仅用于日志。
+// 与 NewStore 分离是为了不改动既有构造签名（多处调用与测试依赖它）。
+func (s *Store) SetDBKind(kind string) { s.dbKind = kind }
+
+// sotName 返回日志中使用的 SoT 名称。
+func (s *Store) sotName() string {
+	if s.dbKind == "" {
+		return "sot"
+	}
+	return s.dbKind
 }
 
 // Current 返回当前配置快照（无锁读）
@@ -145,7 +161,7 @@ func (s *Store) Metering(biz string) *TokenMetering {
 // LoadFromMySQL 从 SoT 全量加载并发布到 Redis
 func (s *Store) LoadFromMySQL(ctx context.Context) (*Snapshot, error) {
 	if s.db == nil {
-		return nil, fmt.Errorf("mysql not configured")
+		return nil, fmt.Errorf("sot database not configured")
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT biz, base_url, path_strip_prefix, enabled, rules_json, metering_json
@@ -254,10 +270,12 @@ func (s *Store) loadFromRedis(ctx context.Context) (*Snapshot, error) {
 func (s *Store) Bootstrap(ctx context.Context) error {
 	if s.db != nil {
 		if _, err := s.LoadFromMySQL(ctx); err == nil {
-			s.log.Info("config loaded from mysql", "version", s.Current().Version, "bizs", len(s.Current().Bizs))
+			s.log.Info("config loaded from sot", "store", s.sotName(),
+				"version", s.Current().Version, "bizs", len(s.Current().Bizs))
 			return nil
 		} else {
-			s.log.Warn("load from mysql failed, falling back to redis", "err", err)
+			s.log.Warn("load from sot failed, falling back to redis",
+				"store", s.sotName(), "err", err)
 		}
 	}
 	snap, err := s.loadFromRedis(ctx)

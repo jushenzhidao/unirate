@@ -9,8 +9,9 @@
 # 降低门槛的正确做法是一键生成强随机值，而不是给一个人人都知道的默认值。
 #
 # 幂等性：已存在 .env 时**拒绝覆盖**并退出非 0。
-# 覆盖已有 .env 会让正在运行的 MySQL 数据卷与新密码不匹配，
-# 表现为重启后 MySQL 认证失败 —— 这种故障排查成本很高，宁可让脚本失败。
+# 覆盖已有 .env 会重新生成 REDIS_PASSWORD，与运行中的 Redis 实例不匹配，
+# 表现为网关启动后所有限流判定失败并触发熔断降级 —— 症状离根因很远，
+# 排查成本很高，宁可让脚本直接失败。
 
 set -euo pipefail
 
@@ -21,7 +22,7 @@ c_g=$'\033[32m'; c_r=$'\033[31m'; c_y=$'\033[33m'; c_0=$'\033[0m'
 
 if [ -e "$ENV_FILE" ]; then
   printf '%s%s 已存在，拒绝覆盖。%s\n\n' "$c_r" "$ENV_FILE" "$c_0"
-  printf '  覆盖已有凭证会与既有 MySQL 数据卷不匹配，导致重启后认证失败。\n\n'
+  printf '  覆盖会重新生成 REDIS_PASSWORD，与运行中的 Redis 不匹配。\n\n'
   printf '  确实要重新生成，请显式操作：\n'
   printf '    mv %s %s.bak && make init\n\n' "$ENV_FILE" "$ENV_FILE"
   printf '  若同时要重建数据卷（%s会清空配置与审计日志%s）：\n' "$c_y" "$c_0"
@@ -36,8 +37,9 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 
 # base64 24 字节 → 32 字符，正好满足 ADMIN_TOKEN 的 >=32 要求。
-# 去掉 base64 里的 / + = ：它们在 MySQL DSN 与 shell 引用中都需要转义，
-# 一个没转义的 / 会让 DSN 解析出错，而报错信息完全指不到密码上。
+# 去掉 base64 里的 / + = ：它们在 redis:// URL、compose 变量插值与 shell
+# 引用中都需要转义，一个没转义的 / 会让连接串解析出错，
+# 而报错信息完全指不到密码上。
 gen() {
   local n="${1:-24}"
   openssl rand -base64 $((n * 2)) | tr -d '/+=\n' | cut -c1-$((n + 8))
@@ -45,8 +47,6 @@ gen() {
 
 ADMIN_TOKEN="$(gen 24)"
 REDIS_PASSWORD="$(gen 18)"
-MYSQL_PASSWORD="$(gen 18)"
-MYSQL_ROOT_PASSWORD="$(gen 18)"
 GRAFANA_PASSWORD="$(gen 18)"
 
 # 生成后自检：ADMIN_TOKEN 必须真的够长。
@@ -87,9 +87,10 @@ GRAFANA_PORT=$(read_port GRAFANA_PORT 29093)
 # ---- 凭证（强随机生成，勿手改为弱值）----
 ADMIN_TOKEN=${ADMIN_TOKEN}
 REDIS_PASSWORD=${REDIS_PASSWORD}
-MYSQL_PASSWORD=${MYSQL_PASSWORD}
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
 GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+
+# 配置 SoT 走容器内 SQLite（见 compose 的 STORE_DSN），不需要数据库凭证。
+# 若要改回外置 MySQL，在此填 STORE_DSN 并自行管理该库的凭证。
 
 # Admin 来源白名单（CIDR，逗号分隔）。刻意留在环境变量、不可从页面改 ——
 # 否则攻击者拿到令牌后能自行放开来源限制。
@@ -114,8 +115,6 @@ chmod 600 "$ENV_FILE"
 printf '%s已生成 %s%s（权限 600，已被 .gitignore 排除）\n\n' "$c_g" "$ENV_FILE" "$c_0"
 printf '  ADMIN_TOKEN         %d 字符\n' "${#ADMIN_TOKEN}"
 printf '  REDIS_PASSWORD      %d 字符\n' "${#REDIS_PASSWORD}"
-printf '  MYSQL_PASSWORD      %d 字符\n' "${#MYSQL_PASSWORD}"
-printf '  MYSQL_ROOT_PASSWORD %d 字符\n' "${#MYSQL_ROOT_PASSWORD}"
 printf '  GRAFANA_PASSWORD    %d 字符\n\n' "${#GRAFANA_PASSWORD}"
 printf '下一步：\n'
 printf '  docker compose up -d --build\n'

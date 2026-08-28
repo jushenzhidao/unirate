@@ -124,20 +124,23 @@ func (s *Server) upsertBiz(w http.ResponseWriter, r *http.Request) {
 		enabled = *p.Enabled
 	}
 
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, txCtx, cancel, err := s.db.BeginWrite(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	defer cancel()
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(),
+	// 冲突子句由 store 层按方言生成：MySQL 用 ON DUPLICATE KEY UPDATE，
+	// SQLite 用 ON CONFLICT(biz) DO UPDATE SET
+	if _, err := tx.ExecContext(txCtx,
 		`INSERT INTO biz_config (biz, base_url, path_strip_prefix, enabled, rules_json, metering_json)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON DUPLICATE KEY UPDATE
-		   base_url=VALUES(base_url), path_strip_prefix=VALUES(path_strip_prefix),
-		   enabled=VALUES(enabled), rules_json=VALUES(rules_json),
-		   metering_json=VALUES(metering_json)`,
+		 VALUES (?, ?, ?, ?, ?, ?)`+
+			s.db.UpsertSuffix(
+				[]string{"biz"},
+				[]string{"base_url", "path_strip_prefix", "enabled", "rules_json", "metering_json"},
+			),
 		p.Biz, p.BaseURL, p.StripPathPrefix, enabled, string(rulesJSON), nullStr(meterJSON),
 	); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -145,7 +148,7 @@ func (s *Server) upsertBiz(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 审计日志与配置变更同事务提交，保证「有变更必有记录」
-	if err := s.audit(r, tx, "upsert_biz", p.Biz, p.Operator, rulesJSON); err != nil {
+	if err := s.audit(txCtx, r, tx, "upsert_biz", p.Biz, p.Operator, rulesJSON); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -173,14 +176,15 @@ func (s *Server) handleBizItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	tx, txCtx, cancel, err := s.db.BeginWrite(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	defer cancel()
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.ExecContext(r.Context(), `DELETE FROM biz_config WHERE biz = ?`, biz)
+	res, err := tx.ExecContext(txCtx, `DELETE FROM biz_config WHERE biz = ?`, biz)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -190,7 +194,7 @@ func (s *Server) handleBizItem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "biz not found"})
 		return
 	}
-	if err := s.audit(r, tx, "delete_biz", biz, r.Header.Get("X-Operator"), nil); err != nil {
+	if err := s.audit(txCtx, r, tx, "delete_biz", biz, r.Header.Get("X-Operator"), nil); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
