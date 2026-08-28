@@ -134,6 +134,9 @@ func (s *Server) upsertBiz(w http.ResponseWriter, r *http.Request) {
 
 	// 冲突子句由 store 层按方言生成：MySQL 用 ON DUPLICATE KEY UPDATE，
 	// SQLite 用 ON CONFLICT(biz) DO UPDATE SET
+	//
+	// #nosec G202 -- 拼接项仅为源码字面量列名，且被 store.assertIdents
+	// 以 ^[a-z_][a-z0-9_]*$ 强制校验；所有值走 ? 占位符。
 	if _, err := tx.ExecContext(txCtx,
 		`INSERT INTO biz_config (biz, base_url, path_strip_prefix, enabled, rules_json, metering_json)
 		 VALUES (?, ?, ?, ?, ?, ?)`+

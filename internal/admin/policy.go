@@ -92,6 +92,8 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, k := range sortedKeys(vals) {
+		// #nosec G202 -- 拼接项仅为源码字面量列名，且被 store.assertIdents
+		// 以 ^[a-z_][a-z0-9_]*$ 强制校验；所有值走 ? 占位符。
 		if _, err := tx.ExecContext(txCtx,
 			`INSERT INTO runtime_config (cfg_key, cfg_value, operator)
 			 VALUES (?, ?, ?)`+

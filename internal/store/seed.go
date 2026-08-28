@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -22,6 +22,9 @@ import (
 //   - 幂等。种子文件必须自带 upsert 语义，因为容器重启会重复执行。
 //   - 失败即致命。种子加载不了就意味着后续验收结论无效，
 //     静默跳过比启动失败危险得多。
+//   - 文件读取限定在 os.Root 作用域内。目录条目名本不含路径分隔符，
+//     但用 Root 让「不可能穿越出 dir」由内核 openat 保证，
+//     而不是依赖对 ReadDir 返回值的推理。
 
 // SeedDirEnv 是种子目录的环境变量名。
 const SeedDirEnv = "SEED_SQL_DIR"
@@ -54,11 +57,16 @@ func (db *DB) LoadSeeds(ctx context.Context, dir string) error {
 	}
 	sort.Strings(files)
 
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open seed root %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
 	for _, name := range files {
-		path := filepath.Join(dir, name)
-		raw, err := os.ReadFile(path)
+		raw, err := readSeedFile(root, name)
 		if err != nil {
-			return fmt.Errorf("read seed %s: %w", path, err)
+			return fmt.Errorf("read seed %s/%s: %w", dir, name, err)
 		}
 		for i, stmt := range splitStatements(string(raw)) {
 			if _, err := db.ExecContext(ctx, stmt); err != nil {
@@ -68,6 +76,19 @@ func (db *DB) LoadSeeds(ctx context.Context, dir string) error {
 		}
 	}
 	return nil
+}
+
+// readSeedFile 在 root 作用域内读取单个种子文件。
+//
+// 抽成函数而非在循环里内联，是为了让 Close 随每个文件的读取结束立即生效；
+// 内联写法的 defer 会堆积到 LoadSeeds 返回时才执行。
+func readSeedFile(root *os.Root, name string) ([]byte, error) {
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
 }
 
 // splitStatements 按分号切分 SQL 并剔除注释与空语句。

@@ -33,6 +33,9 @@ const (
 )
 
 // PolicyEnvName 键名 → 对应环境变量名。用于「是否被环境变量显式设置」的判定。
+// 表中的值是环境变量的**名字**，不含任何凭证内容。Tier 0 凭证项
+// （ADMIN_TOKEN 等）按 CONFIG-TIERING.md 明确不进此白名单。
+// #nosec G101 -- 映射表存的是环境变量名，非凭证值
 var PolicyEnvName = map[string]string{
 	KeyExposeRuleName:     "EXPOSE_RULE_NAME",
 	KeyUpstreamTimeout:    "UPSTREAM_TIMEOUT",

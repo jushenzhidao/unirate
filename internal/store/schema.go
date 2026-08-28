@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -13,6 +14,27 @@ import (
 // 足以覆盖「全新部署」与「重启」两个场景，多一个框架就多一份供应链与
 // 版本表状态机需要维护。若将来出现破坏性 schema 变更，再引入。
 
+// identRe 限定可拼入 SQL 的标识符形态：小写字母、数字、下划线，首字符非数字。
+// 本仓库所有表名列名都符合该约定。
+var identRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// assertIdents 校验列名是否为安全标识符，不合规直接 panic。
+//
+// 为什么是 panic 而不是返回 error：列名在本仓库全部是源码字面量，
+// 不合规只可能是编码错误，不是运行时可恢复的输入问题。让它在
+// 首次调用（即启动后第一次配置写入）就炸掉，比返回 error 被
+// 上层包装成 500 更容易定位。
+//
+// 这道校验同时是 gosec G202 的实质依据：拼入 SQL 的部分被约束为
+// 标识符集合，注入载荷（引号、分号、空格、注释符）无法通过。
+func assertIdents(cols []string) {
+	for _, c := range cols {
+		if !identRe.MatchString(c) {
+			panic(fmt.Sprintf("store: unsafe SQL identifier %q", c))
+		}
+	}
+}
+
 // UpsertSuffix 返回 upsert 的冲突处理子句。
 //
 // 这是 MySQL 与 SQLite 唯一的语法分歧点。抽出为方法而非在调用点
@@ -20,7 +42,13 @@ import (
 //
 // keyCols 为唯一键列（SQLite 需显式声明冲突目标，MySQL 不需要），
 // updCols 为冲突时要覆盖的列。
+//
+// 两者均只接受源码字面量列名，由 assertIdents 强制。值一律走 ?
+// 占位符，绝不拼接。
 func (db *DB) UpsertSuffix(keyCols, updCols []string) string {
+	assertIdents(keyCols)
+	assertIdents(updCols)
+
 	var sb strings.Builder
 	switch db.Kind {
 	case KindMySQL:
