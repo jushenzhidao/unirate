@@ -78,12 +78,16 @@ jobs:
           diff go.mod go.mod.bak || { echo "::error::go.mod 未同步，请本地执行 go mod tidy"; exit 1; }
           diff go.sum go.sum.bak || { echo "::error::go.sum 未同步，请本地执行 go mod tidy"; exit 1; }
 
-      # 版本需与 GO_VERSION 同步向上：golangci-lint 用自身编译时的 Go 做类型
-      # 检查，旧版遇到更新的工具链会整体报加载错误，而非报出具体问题。
-      # v1.64.8 已实测可在 Go 1.25 下编译并通过本仓库全部检查。
-      - uses: golangci/golangci-lint-action@v6
+      # 版本约束的判据是 go.mod 的 go 指令，不是 runner 的工具链版本：
+      # golangci-lint 若「自身编译用的 Go」低于「go.mod 声明的目标 Go」，
+      # 会直接 exit 3 报 can't load config，而非报出具体 lint 问题。
+      # 历史踩坑：modernc.org/sqlite 要求 go 1.25.0，把 go.mod 顶上去后，
+      # 用 Go 1.24 构建的 v1.64.8 立即失效（此前注释误判为「Go 1.25 可用」）。
+      # v1 系列终版即 v1.64.8，无更新可用，故迁至 v2；v2 需搭配 action@v7，
+      # 且 .golangci.yml 必须为 version: "2" 格式。
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64.8
+          version: v2.13.2
           args: --timeout=5m
 
   unit-test:

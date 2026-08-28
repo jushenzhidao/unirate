@@ -159,7 +159,7 @@ func (m *Metrics) Render() string {
 
 	sb.WriteString("# HELP " + nsPrefix + "uptime_seconds Process uptime.\n")
 	sb.WriteString("# TYPE " + nsPrefix + "uptime_seconds gauge\n")
-	sb.WriteString(fmt.Sprintf("%suptime_seconds %.3f\n", nsPrefix, time.Since(m.startedAt).Seconds()))
+	fmt.Fprintf(&sb, "%suptime_seconds %.3f\n", nsPrefix, time.Since(m.startedAt).Seconds())
 	return sb.String()
 }
 
