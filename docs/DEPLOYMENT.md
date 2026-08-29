@@ -26,22 +26,17 @@ make init
 
 生成 `.env`（权限 600），凭证来自 `openssl rand -base64 24`。
 
-`.env` 已存在时会**拒绝覆盖**并退出非 0。这是刻意的：覆盖凭证会与既有 MySQL
-数据卷不匹配，表现为重启后认证失败，而错误信息完全指不到密码上。
-确需重置：
+`.env` 已存在时会**拒绝覆盖**并退出非 0。这是刻意的：新生成的 `REDIS_PASSWORD`
+与正在运行的 Redis 实例不匹配，表现为网关启动后计数器读写全部失败，
+而错误信息完全指不到密码上。确需重置：
 
 ```bash
 mv .env .env.bak && make init
-docker compose down -v && docker compose up -d --build   # 数据卷也要重建
+make down && docker compose up -d --build
 ```
 
-`docker compose down -v` 会清空 `biz_config`、`audit_log`、`runtime_config`。
-先备份：
-
-```bash
-source .env
-docker compose exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" unirate > backup.sql
-```
+`make down` 会清空 `biz_config`、`audit_log`、`runtime_config`（都在 SQLite 卷里）。
+先备份，方式见 §5.1 —— **不要直接 `docker cp` 库文件**，那样拿到的备份是空的。
 
 ### 1.3 为什么没有默认凭证
 
@@ -76,11 +71,15 @@ docker compose --profile obs up -d --build
 ### 1.5 验证
 
 ```bash
-./test/e2e/run.sh
+make e2e
 ```
 
-50 条断言全通过才算成功。脚本从 `.env` 读取 `ADMIN_TOKEN`，读不到直接失败 ——
+56 条断言全通过才算成功。脚本从 `.env` 读取 `ADMIN_TOKEN`，读不到直接失败 ——
 拿不到真令牌的鉴权验收是无效的。
+
+用 `make e2e` 而不是直接跑 `./test/e2e/run.sh`：脚本依赖 `docker-compose.test.yml`
+提供的 `mock-upstream` 夹具与 demo 种子数据，缺了它网关能起、`/live` 也通，
+但脚本会在前置检查处退出 1。`make e2e` 已封装 overlay 与前置清理。
 
 ---
 
@@ -98,7 +97,7 @@ ADMIN=http://127.0.0.1:${ADMIN_PORT}
 ### 2.1 进程与依赖
 
 ```bash
-# 期望：4 个容器（含 obs profile 为 6），全部 healthy
+# 期望：2 个容器 redis + gateway（含 obs profile 为 4），全部 healthy
 docker compose ps
 
 # 期望：HTTP 200
@@ -302,8 +301,10 @@ ssh -L 29090:127.0.0.1:29090 user@gateway-host
 | `8080` proxy | 业务流量 | **可公开** | 唯一对外服务面；无鉴权，鉴权由上游业务负责 |
 | `9091` obs | `/metrics` `/live` `/ready` `/health` | **仅监控网** | 无鉴权，暴露配置版本、熔断状态、业务域数量等内部信息 |
 | `9090` admin | 配置读写 | **绝不公开** | 可改写全局限流规则；仅回环 + Token + CIDR 白名单 |
-| `3306` mysql | SoT | 不映射宿主 | 仅容器网络内可达 |
-| `6379` redis | 计数器 | 不映射宿主 | 同上，且强制密码 |
+| `6379` redis | 计数器 | 不映射宿主 | 仅容器网络内可达，且强制密码 |
+
+配置 SoT 是进程内嵌的 SQLite（`sqlite-data` 卷内的 `/var/lib/unirate/unirate.db`），
+**没有监听端口**，因此不在上表 —— 这也是它取代 MySQL 后减少的一整个攻击面。
 
 obs 端口不能和业务端口合并：`/metrics` 会泄露业务域列表与流量特征。
 e2e 有一条断言专门守这个（业务端口访问 `/metrics` 必须非 200）。
@@ -339,16 +340,41 @@ e2e 有一条断言专门守这个（业务端口访问 `/metrics` 必须非 200
 
 ### 4.1 Tier 0 — 必须环境变量，且无默认值
 
-`ADMIN_TOKEN` `MYSQL_PASSWORD` `MYSQL_ROOT_PASSWORD` `REDIS_PASSWORD` `GRAFANA_PASSWORD`
+`ADMIN_TOKEN` `REDIS_PASSWORD` `GRAFANA_PASSWORD`
 
 缺失即拒绝启动。由 `make init` 生成。
+
+`LOGFIRE_TOKEN` 属同类凭证，但**刻意不用 `${VAR:?}` 强制语法**：它只服务于
+可选的 `logfire` profile，而 compose 的变量插值发生在 profile 过滤之前 ——
+用强制语法会让一个没启用的可选组件卡死所有 compose 命令。校验因此下移到
+`deploy/otel/collector.yaml`，由 Collector 自身在启动时拒绝空值。
 
 ### 4.2 Tier 0 — 环境变量，可有默认值
 
 改动需重建监听或连接池，因此无法热更新：
 
 `PROXY_ADDR` `OBS_ADDR` `ADMIN_ADDR` `REDIS_ADDRS` `REDIS_DB` `REDIS_POOL_SIZE`
-`REDIS_TIMEOUT` `MYSQL_DSN` `TZ_OFFSET_SECONDS` `SHUTDOWN_GRACE`
+`REDIS_TIMEOUT` `STORE_DSN` `TZ_OFFSET_SECONDS` `SHUTDOWN_GRACE`
+
+`STORE_DSN` 决定 SoT 后端，按形式判定（见 `internal/store/store.go` 的 `parseDSN`）：
+
+| DSN 形式 | 后端 |
+|----------|------|
+| 空 | SQLite，落 `./data/unirate.db`（`SQLITE_PATH` 可覆盖） |
+| `sqlite:///abs/path.db` | SQLite 指定路径 |
+| `/abs/path.db`、`./rel.db`、`*.db`、`*.sqlite` | SQLite |
+| `file:...?_pragma=...` | 直接透传 SQLite 驱动，pragma 自行负责 |
+| `user:pass@tcp(host:3306)/db`、`mysql://...` | MySQL |
+
+**无法识别的形式直接报错**，不做兜底猜测 —— 拼错的 DSN 静默退化成本地
+SQLite 文件，会让人以为连上了远端库，而配置写在了一个谁也不会去看的文件里。
+
+compose 里设为 `/var/lib/unirate/unirate.db`（对应 `sqlite-data` 卷）。
+旧变量名 `MYSQL_DSN` 仍被识别，仅为兼容既有部署，新部署用 `STORE_DSN`。
+
+连接池按后端区分，这是正确性要求而非调优：SQLite 在 WAL 下允许多读单写，
+并发写会撞 `SQLITE_BUSY`，因此写连接限制为 1，由 `database/sql` 排队，
+而不是依赖 `busy_timeout` 自旋重试。
 
 以下技术上能热更新，但**刻意留在环境变量**：
 
@@ -405,7 +431,7 @@ curl -X PUT $ADMIN/admin/policy -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ### 4.5 Tier 2 — 业务限流规则
 
-`/admin/bizs` 读写，MySQL 为 SoT，Pub/Sub 秒级生效。校验见 `/admin/rules/validate`。
+`/admin/bizs` 读写，SQLite 为 SoT，Pub/Sub 秒级生效。校验见 `/admin/rules/validate`。
 
 ---
 
@@ -414,10 +440,11 @@ curl -X PUT $ADMIN/admin/policy -H "Authorization: Bearer $ADMIN_TOKEN" \
 ### 5.1 升级
 
 ```bash
-# 1. 备份（配置与审计日志都在 MySQL）
-source .env
-docker compose exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" unirate \
-  > backup-$(date +%Y%m%d-%H%M).sql
+# 1. 备份（biz_config / audit_log / runtime_config 都在 SQLite 卷里）
+#    必须用 .backup，见下方说明
+docker run --rm -v unirate_sqlite-data:/d -v "$PWD:/out" alpine:3.20 sh -c \
+  'apk add --no-cache sqlite >/dev/null && \
+   sqlite3 /d/unirate.db ".backup /out/backup-$(date +%Y%m%d-%H%M).db"'
 
 # 2. 记录当前版本，回滚时要用
 docker compose images gateway
@@ -426,38 +453,59 @@ git rev-parse HEAD
 # 3. 拉取新代码
 git pull
 
-# 4. 应用数据库迁移
-#    init.sql 只在数据卷为空时执行，已运行的部署不会自动建新表
-make migrate
-
-# 5. 滚动重建
+# 4. 滚动重建（建表由进程启动时幂等完成，无需单独的迁移步骤）
 docker compose up -d --build gateway
 
-# 6. 验证（必须做，不能只看容器状态）
-./test/e2e/run.sh
+# 5. 验证（必须做，不能只看容器状态）
+make e2e
 ```
 
-第 4 步不能跳。`runtime_config` 表缺失时网关不会报错 —— 代码把「表不存在」
-当作「无覆盖项」处理并回落到环境变量继续服务。好处是老部署升级不会起不来，
-代价是**页面配置会静默失效**：改了、返回 200、但没生效。
-`make migrate` 是幂等的，重复执行安全。
+**运行中不要用 `docker cp` 或 `cp` 直接拷 `unirate.db`。** 库跑在 WAL 模式下，
+最近写入停留在 `unirate.db-wal` 侧车文件里还没合并进主库。
+
+实测：写入一个业务域后立刻用三种方式备份，再从备份里查 `biz_config`。
+
+| 方式 | 时机 | 产物 | 查 `biz_config` |
+|------|------|------|-----------------|
+| `cp unirate.db` | 运行中 | 36 KB | **0 行** |
+| `sqlite3 ... ".backup"` | 运行中 | 36 KB | 1 行，数据完整 |
+| `cp unirate.db` | `down` 之后 | 36 KB | 1 行，数据完整 |
+
+热备那份的失效形态比"文件损坏"隐蔽得多：**大小正常、表结构齐全、
+`.schema` 看不出任何问题，只是数据是空的**。运维拿到一份 36 KB 的备份，
+没有任何可疑信号，直到真要恢复那天才发现里面什么都没有。
+
+第三行解释了为什么这个坑能长期存活：`docker compose down` 干净关停时
+SQLite 会做检查点合并，WAL 清空、数据全部落进主库，所以**停机后**拷单文件
+确实拿得到完整数据。同一条 `cp` 命令在停机时可用、热备时静默产出空库 ——
+成功过一次，就更不会去怀疑它。
+
+结论：统一用 `.backup`，它自行处理 WAL 检查点，两种状态下都正确。
+要坚持文件级备份就必须三个文件一起拷（`.db` `.db-wal` `.db-shm`）。
+
+原先的 `make migrate` 步骤已移除：DDL 内嵌在 `internal/store/schema.go`，
+每次启动幂等执行，`runtime_config` 表不会再缺失。老部署升级也无需人工介入。
 
 ### 5.2 回滚
 
 ```bash
 git checkout <上一个可用 commit>
 docker compose up -d --build gateway
-./test/e2e/run.sh
+make e2e
 ```
 
 数据层通常不需要回滚：`runtime_config` 表存在但代码不认识它，只是被忽略。
-确需清除：
+确需清除（会丢失全部页面侧配置改动）：
 
-```sql
-DROP TABLE runtime_config;   -- 会丢失全部页面侧配置改动
+```bash
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 sh -c \
+  'apk add --no-cache sqlite >/dev/null && \
+   sqlite3 /d/unirate.db "DROP TABLE runtime_config;"'
+docker compose restart gateway   # 重启时会重新幂等建表
 ```
 
-凭证不要在回滚时重新生成 —— 那会与既有 MySQL 数据卷不匹配。
+凭证不要在回滚时重新生成 —— 新的 `REDIS_PASSWORD` 与运行中的 Redis 不匹配，
+计数器读写会全部失败。
 
 ### 5.3 零中断说明
 
@@ -465,7 +513,21 @@ DROP TABLE runtime_config;   -- 会丢失全部页面侧配置改动
 
 - 多实例部署，SLB 按 `/ready` 摘流（网关退出前先让 `/ready` 转 503，再等在途请求结束，
   由 `SHUTDOWN_GRACE` 控制，默认 30s）
-- Redis / MySQL 不要与网关同批重启
+- Redis 不要与网关同批重启
+
+SQLite 随网关进程共生，不构成独立的重启依赖 —— 这是它取代 MySQL 后
+少掉的一个协调环节。
+
+**多实例部署必须把 `STORE_DSN` 指向共享 MySQL。** 配置读取路径本身没问题：
+所有实例都从 Redis 快照读，不查 SoT，Pub/Sub 秒级同步（见 §6.4）。
+问题在写入侧 —— SQLite 是进程本地文件，各实例各持一份：
+
+- 管理面写请求被 SLB 打到哪个实例，配置就只落进那个实例的库
+- 该实例的库成为事实上的唯一 SoT，其余实例的库是永不更新的死数据
+- 审计日志按请求落点散落各实例，问责记录不完整
+- 任一实例重启并从本地库 bootstrap 时，会用自己那份陈旧数据覆盖 Redis 快照
+
+单实例部署不受影响，这也是默认形态。
 
 ---
 
@@ -504,20 +566,39 @@ docker compose ps redis
 `unirate_redis_breaker_open` 必须纳入告警。它区分「限流正在精确生效」与
 「限流已静默失效」—— 后者不会有任何用户可见症状。
 
-### 6.2 MySQL 挂了会怎样
+### 6.2 SoT（SQLite）不可用会怎样
 
-- **业务流量不受影响**：网关读配置走 Redis 快照，不查 MySQL
-- **管理面写入不可用**：返回 503（`/admin/bizs` POST、`/admin/policy` PUT）
+SQLite 是进程内库，不存在「数据库服务挂了」这种独立故障 —— 取代 MySQL 后
+少掉的正是这一整类故障面。剩下的真实形态是**卷不可写**（权限错误、磁盘满）：
+
+- **业务流量不受影响**：网关读配置走 Redis 快照，不查 SoT
+- **管理面写入失败**：`/admin/bizs` PUT、`/admin/policy` PUT 返回 5xx
 - **管理面读取仍可用**：`GET /admin/policy`、`/admin/snapshot` 读本地快照
-- 网关重启时若 MySQL 不可达，退到 Redis 快照启动
+- 网关重启时若 SoT 打不开，退到 Redis 快照启动，日志出现
+  `load from sot failed, falling back to redis`
 
 ```bash
-docker compose ps mysql
-docker compose logs --tail=100 mysql
-source .env && docker compose exec -T mysql mysqladmin ping -u root -p"$MYSQL_ROOT_PASSWORD"
+# 卷内文件与归属（应为 10001:10001）
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 ls -ln /d
+
+# 磁盘水位
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 df -h /d
+
+# 启动时选定的后端
+docker compose logs gateway | grep -E 'store connected|loaded from sot'
 ```
 
-`GET /admin/policy` 刻意不要求 MySQL：故障期间恰恰是最需要看配置的时候。
+归属不对是最常见的原因：卷首次挂载到镜像中不存在的路径时会以 `root:root`
+创建，而容器以 UID 10001 运行。Dockerfile 已预建 `/var/lib/unirate` 并
+chown，空卷会继承这个归属；若是从旧版本升级上来的既有卷，需手工修：
+
+```bash
+docker compose down
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 chown -R 10001:10001 /d
+docker compose up -d
+```
+
+`GET /admin/policy` 刻意不要求 SoT：故障期间恰恰是最需要看配置的时候。
 
 ### 6.3 `/ready` 一直 503
 
@@ -527,14 +608,18 @@ curl -s $OBS/health
 
 看 `components.config.version`：
 
-- `0` → 配置从未加载成功。检查 MySQL 连通性与 `MYSQL_DSN`
-- `> 0` 但 `biz_count = 0` → 表是空的，检查 `init.sql` 是否执行
-  （只在数据卷为空时执行，卷里有旧数据就不会跑）
+- `0` → 配置从未加载成功。检查 `STORE_DSN` 与卷可写性（§6.2）
+- `> 0` 但 `biz_count = 0` → 表是空的，说明还没通过 `/admin/bizs` 配过业务域。
+  建表是自动的（启动时幂等执行内嵌 DDL），空表属于正常初始状态，不是故障
+
+网关镜像是 distroless 风格，**容器内没有 `sqlite3`**，查表要用一次性容器
+挂同一个卷（注意：`docker compose down` 后再查更可靠，避免与运行中的
+写连接争锁）：
 
 ```bash
-source .env
-docker compose exec -T mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" unirate \
-  -e 'SELECT biz, enabled FROM biz_config;'
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 sh -c \
+  'apk add --no-cache sqlite >/dev/null && \
+   sqlite3 /d/unirate.db "SELECT biz, enabled FROM biz_config;"'
 ```
 
 ### 6.4 页面改了配置不生效
@@ -542,14 +627,18 @@ docker compose exec -T mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" unirate \
 按顺序排查，每步都有明确判据：
 
 ```bash
-source .env
 # 1. SoT 里有没有？没有 → 写入没成功，看 PUT 的响应码
-docker compose exec -T mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" unirate \
-  -e 'SELECT * FROM runtime_config;'
+docker run --rm -v unirate_sqlite-data:/d alpine:3.20 sh -c \
+  'apk add --no-cache sqlite >/dev/null && \
+   sqlite3 /d/unirate.db "SELECT * FROM runtime_config;"'
 ```
 
-表不存在 → 漏了 `make migrate`。这是最常见的原因，且**不会报错**：
-代码把缺表当作「无覆盖项」，PUT 会失败但 GET 一切正常。
+表不存在已不再是常见原因 —— DDL 内嵌在 `internal/store/schema.go`，
+每次启动幂等建表。若真的缺表，说明建表阶段就失败了，
+查 `docker compose logs gateway | grep -i migrate`，通常是卷权限问题（§6.2）。
+
+需要留意的是代码把缺表当作「无覆盖项」处理：这让老部署升级不会起不来，
+代价是 PUT 会失败而 GET 一切正常 —— 症状不指向根因。
 
 ```bash
 # 2. 生效值是什么？source 字段说明它来自哪一层
@@ -618,12 +707,12 @@ curl -X PUT $ADMIN/admin/policy -H "Authorization: Bearer $ADMIN_TOKEN" \
 ```bash
 make help          # 全部可用目标
 make init          # 生成 .env（已存在则拒绝）
-make migrate       # 对运行中的 MySQL 应用增量迁移
-make up            # 启动并等待就绪
-make down          # 停止并清理数据卷（会丢数据）
+make up            # 启动生产编排（redis + gateway），不含测试夹具
+make up-test       # 启动 + 测试夹具（mock-upstream / demo 种子），e2e 用
+make down          # 停止并清理数据卷（含测试夹具，会丢数据）
 make logs          # 跟踪网关日志
-make ps            # 服务状态
-make e2e           # 端到端验收
-make test          # 单元测试（含 race + 真实 Redis）
-make verify        # 提交前完整校验
+make ps            # 服务状态（含测试夹具）
+make e2e           # 端到端验收（自动重建干净栈）
+make test          # 全量测试（含 race + 真实 Redis）
+make verify        # 提交前完整校验（vet + test）
 ```
