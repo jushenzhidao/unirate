@@ -65,15 +65,6 @@ func env(k, def string) string {
 	return def
 }
 
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v = strings.TrimSpace(v); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func envInt(k string, def int) int {
 	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
