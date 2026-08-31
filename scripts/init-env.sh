@@ -88,7 +88,6 @@ REDIS_PASSWORD=${REDIS_PASSWORD}
 LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
 
 # 配置 SoT 走容器内 SQLite（见 compose 的 STORE_DSN），不需要数据库凭证。
-# 若要改回外置 MySQL，在此填 STORE_DSN 并自行管理该库的凭证。
 
 # Admin 来源白名单（CIDR，逗号分隔）。刻意留在环境变量、不可从页面改 ——
 # 否则攻击者拿到令牌后能自行放开来源限制。

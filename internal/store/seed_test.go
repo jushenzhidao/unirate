@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// LoadSeeds 是 e2e demo 业务域的唯一注入路径（替代了 MySQL 镜像的
-// /docker-entrypoint-initdb.d）。它一旦静默失效，e2e 会以「找不到
-// 业务域」的形式报错，看起来像限流逻辑出问题，排查成本极高。
+// LoadSeeds 是 e2e demo 业务域的唯一注入路径。
+// 它一旦静默失效，e2e 会以「找不到业务域」的形式报错，
+// 看起来像限流逻辑出问题，排查成本极高。
 // 因此这里覆盖它的四个关键语义：执行顺序、幂等、失败即报、目录缺失容忍。
 
 func writeSeed(t *testing.T, dir, name, body string) {

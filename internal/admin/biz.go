@@ -132,8 +132,7 @@ func (s *Server) upsertBiz(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	defer func() { _ = tx.Rollback() }()
 
-	// 冲突子句由 store 层按方言生成：MySQL 用 ON DUPLICATE KEY UPDATE，
-	// SQLite 用 ON CONFLICT(biz) DO UPDATE SET
+	// 冲突子句由 store 层生成：ON CONFLICT(biz) DO UPDATE SET
 	//
 	// #nosec G202 -- 拼接项仅为源码字面量列名，且被 store.assertIdents
 	// 以 ^[a-z_][a-z0-9_]*$ 强制校验；所有值走 ? 占位符。
@@ -160,7 +159,7 @@ func (s *Server) upsertBiz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, err := s.store.LoadFromMySQL(r.Context())
+	snap, err := s.store.LoadFromDB(r.Context())
 	if err != nil {
 		// 已落 SoT，只是发布失败；网关轮询兜底最终会拉到
 		s.log.Error("publish config after upsert failed", "err", err)
@@ -206,7 +205,7 @@ func (s *Server) handleBizItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, _ := s.store.LoadFromMySQL(r.Context())
+	snap, _ := s.store.LoadFromDB(r.Context())
 	ver := int64(0)
 	if snap != nil {
 		ver = snap.Version

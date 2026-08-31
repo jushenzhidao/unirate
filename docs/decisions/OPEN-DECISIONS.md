@@ -11,7 +11,7 @@
 
 | Date | Source | Open Item | Related Constraints | Current Leaning | Blocked By | Resolves When | Status |
 |------|--------|-----------|---------------------|-----------------|------------|---------------|--------|
-| 2026-08-23 | Phase 0 | MySQL 连接池 MaxOpenConns=16 是否偏保守 | 配置读取为低频操作（Bootstrap + Admin 写入 + 轮询兜底），但 Admin 管理页面上线后查询频次会上升 | 维持 16，先补 SetConnMaxIdleTime + 暴露 db.Stats() 指标；**判据已由 ADR-004 定案：WaitCount > 0 才上调** | 等 db.Stats().WaitCount 实测数据 | 压测显示 WaitCount > 0 时上调 | OPEN |
+| 2026-08-23 | Phase 0 | ~~MySQL 连接池 MaxOpenConns=16 是否偏保守~~ | — | **已作废**：SoT 移除 MySQL，改为进程内嵌 SQLite，池固定为单连接（WAL 下仅允许单写者，放开并发只会把排队变成 SQLITE_BUSY 重试）。ADR-004 第四节已同步改写 | — | 已随 MySQL 移除关闭 | CLOSED |
 | 2026-08-23 | Phase 1 | store.Rules(biz) 每请求 append 合并全局+biz 规则是否值得预计算 | 该路径每请求调用（handler.go:147），但 atomic.Pointer 读本身无锁，分配量取决于规则数（demo 仅 4 条）；**当前无该路径基准数据** | 倾向不做——在未测量处优化属 gc-guide 明确警告的反模式 | 需 CPU profile 证明其为热点 | profile 显示占比 > 5% 则实施，否则关闭为「不做」 | OPEN |
 | 2026-08-23 | Phase 3 | 剩余 4 个既有生产文件超「单文件 ≤300 行」规范：handler.go(561) / limiter.go(458) / store.go(365) / main.go(324)。**已消除 2 个**：`admin/server.go` 528→292（拆出 biz.go / audit.go）、`obs/metrics.go` 327→244（拆出 registry.go），两次拆分均因本轮要在这两个文件内新增指标端点，属「改到即拆」而非独立重构，全量 race 9 包 + e2e 50/50 已验证行为未变 | 贝洛奇已把自己新增的 policy.go 从 308 行拆成 3 个文件，但既有文件未动。这些正是本轮多人同时改动的核心：handler.go 被架构师 POC 与前端静态挂载同时触碰，server.go 被前端加路由，此刻重构必然冲突 | **本轮不拆，登记为技术债**。理由：①重构核心文件与进行中的 POC/前端工作直接冲突，风险收益不成比例 ②拆分不改变行为，无法用测试证明「拆对了」，只能靠 review，而 review 成本此刻最高 ③测试文件（limiter_test 581 / server_test 388）不适用同一标准，测试用例线性增长属正常 | 等本轮 POC 与前端落地收口 | 所有 in-flight 改动完成后，单独一轮重构并逐文件跑回归 | OPEN |
 

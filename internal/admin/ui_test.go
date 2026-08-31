@@ -32,6 +32,11 @@ func TestUIServedWithoutAuth(t *testing.T) {
 
 // TestStaticAssetsCarryNoSecrets 静态壳不鉴权的前提是它不含任何机密。
 // 这条是上一个测试的对价：既然放开了鉴权，就必须证明放开的东西是空的。
+//
+// 断言的是「机密值」而非「变量名」。控制台文案里出现 ADMIN_TOKEN 这类
+// 变量名是必要的用户引导（告诉运维令牌该去哪儿配），本身不构成泄露；
+// 早期版本按变量名匹配，结果把帮助文案判成泄露 —— 那种断言只会训练
+// 后来的人删掉有用的提示文字来让测试变绿。
 func TestStaticAssetsCarryNoSecrets(t *testing.T) {
 	s := newTestServer(t, Options{Addr: ":0"})
 	h := s.Handler()
@@ -44,10 +49,11 @@ func TestStaticAssetsCarryNoSecrets(t *testing.T) {
 		if strings.Contains(body, testToken) {
 			t.Errorf("%s 的响应体含 Admin 令牌", p)
 		}
-		// 资产是编译期固定的，不该出现任何运行时配置值
-		for _, leak := range []string{"MYSQL_DSN", "REDIS_ADDR", "mysql://", "redis://"} {
+		// 资产是编译期固定的，不该内联任何运行时配置的「值」。
+		// redis:// 与 @tcp( 是连接串特征，出现即意味着 DSN 被注入了前端。
+		for _, leak := range []string{"redis://", "@tcp(", "Bearer eyJ"} {
 			if strings.Contains(body, leak) {
-				t.Errorf("%s 的响应体含运行时配置 %q", p, leak)
+				t.Errorf("%s 的响应体含运行时配置值特征 %q", p, leak)
 			}
 		}
 	}
@@ -110,7 +116,7 @@ func TestUnknownAdminPathIs404NotHTML(t *testing.T) {
 
 // TestUIDoesNotLeakBackendStateWhenDepsDown 依赖全挂时静态壳仍应可用。
 //
-// 这正是最需要打开控制台的时刻：MySQL 挂了要能进来看配置。
+// 这正是最需要打开控制台的时刻：SoT 挂了要能进来看配置。
 // 若静态资产也依赖 store/db，故障时界面直接白屏，等于故障时没有工具。
 func TestUIDoesNotLeakBackendStateWhenDepsDown(t *testing.T) {
 	s := newTestServer(t, Options{Addr: ":0"}) // db 与 store 均为 nil

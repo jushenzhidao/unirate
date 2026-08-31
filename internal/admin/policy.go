@@ -72,11 +72,11 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 
 	// DB 守卫排在全部请求校验**之后**，与 allowMethods 排在依赖守卫之前
 	// 是同一条理由：请求是否合法是请求自身的属性，与后端是否就绪无关。
-	// 顺序颠倒会让一个越界值在 MySQL 抖动时得到 503，
+	// 顺序颠倒会让一个越界值在 SoT 不可用时得到 503，
 	// 掩盖了「这个值根本不被接受」的真实原因。
 	//
 	// 守卫放在这里而不是中间件层：GET 只读本地快照，
-	// MySQL 抖动时仍应能查看当前配置 —— 那恰恰是最需要看配置的时候。
+	// SoT 不可用时仍应能查看当前配置 —— 那恰恰是最需要看配置的时候。
 	if s.db == nil {
 		writeJSON(w, http.StatusServiceUnavailable,
 			map[string]string{"error": "database not available"})
@@ -123,7 +123,7 @@ func (s *Server) putPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snap, err := s.store.LoadFromMySQL(r.Context())
+	snap, err := s.store.LoadFromDB(r.Context())
 	if err != nil {
 		// 已落 SoT，只是发布失败；其它实例靠轮询兜底最终会拉到
 		s.log.Error("publish policy after update failed", "err", err)

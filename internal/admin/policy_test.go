@@ -247,14 +247,14 @@ func TestPolicyWriteRejectedWithoutDB(t *testing.T) {
 	}
 }
 
-// TestPolicyGetWorksWithoutDB 读路径只用本地快照，MySQL 抖动时仍应可用。
+// TestPolicyGetWorksWithoutDB 读路径只用本地快照，SoT 不可用时仍应可用。
 // 若把 requireDB 套在整个端点上，运维在故障期间连"看一眼当前配置"都做不到 ——
 // 而那恰恰是最需要看配置的时候。
 func TestPolicyGetWorksWithoutDB(t *testing.T) {
 	h := policyServer(t) // db 为 nil
 	code, body := doPolicy(t, h, "GET", "/admin/policy", "")
 	if code != http.StatusOK {
-		t.Errorf("MySQL 不可用时读取配置仍应成功，实际 %d: %v", code, body)
+		t.Errorf("SoT 不可用时读取配置仍应成功，实际 %d: %v", code, body)
 	}
 }
 

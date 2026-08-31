@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// 建表与方言差异。
+// 建表与 SQLite 方言。
 //
 // 设计取舍：不引入 migration 框架（golang-migrate / goose）。
 // 理由：只有三张表，且明确不需要兼容旧版本 —— 幂等 CREATE TABLE IF NOT EXISTS
@@ -35,12 +35,9 @@ func assertIdents(cols []string) {
 	}
 }
 
-// UpsertSuffix 返回 upsert 的冲突处理子句。
+// UpsertSuffix 返回 SQLite upsert 的冲突处理子句。
 //
-// 这是 MySQL 与 SQLite 唯一的语法分歧点。抽出为方法而非在调用点
-// switch，是为了让新增 upsert 的人无法忘记处理方言。
-//
-// keyCols 为唯一键列（SQLite 需显式声明冲突目标，MySQL 不需要），
+// keyCols 为唯一键列（SQLite 需显式声明冲突目标），
 // updCols 为冲突时要覆盖的列。
 //
 // 两者均只接受源码字面量列名，由 assertIdents 强制。值一律走 ?
@@ -50,34 +47,19 @@ func (db *DB) UpsertSuffix(keyCols, updCols []string) string {
 	assertIdents(updCols)
 
 	var sb strings.Builder
-	switch db.Kind {
-	case KindMySQL:
-		sb.WriteString(" ON DUPLICATE KEY UPDATE ")
-		for i, c := range updCols {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			fmt.Fprintf(&sb, "%s=VALUES(%s)", c, c)
+	fmt.Fprintf(&sb, " ON CONFLICT(%s) DO UPDATE SET ", strings.Join(keyCols, ", "))
+	for i, c := range updCols {
+		if i > 0 {
+			sb.WriteString(", ")
 		}
-	default: // SQLite
-		fmt.Fprintf(&sb, " ON CONFLICT(%s) DO UPDATE SET ", strings.Join(keyCols, ", "))
-		for i, c := range updCols {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			fmt.Fprintf(&sb, "%s=excluded.%s", c, c)
-		}
+		fmt.Fprintf(&sb, "%s=excluded.%s", c, c)
 	}
 	return sb.String()
 }
 
 // Migrate 幂等建表
 func (db *DB) Migrate(ctx context.Context) error {
-	stmts := sqliteDDL
-	if db.Kind == KindMySQL {
-		stmts = mysqlDDL
-	}
-	for _, s := range stmts {
+	for _, s := range sqliteDDL {
 		if _, err := db.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("migrate: %w\nstatement: %s", err, s)
 		}
@@ -87,7 +69,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 
 // sqliteDDL SQLite 建表语句。
 //
-// 与 MySQL 版的实质差异：
+// DDL 特性：
 //   - AUTOINCREMENT 需配合 INTEGER PRIMARY KEY
 //   - 无 JSON 类型，用 TEXT（SQLite 的 JSON1 扩展仍可查询 TEXT 中的 JSON）
 //   - BOOLEAN 存为 INTEGER 0/1
@@ -138,38 +120,4 @@ var sqliteDDL = []string{
 		BEGIN
 			UPDATE runtime_config SET updated_at = CURRENT_TIMESTAMP WHERE cfg_key = OLD.cfg_key;
 		END`,
-}
-
-// mysqlDDL MySQL 建表语句，与 deploy/mysql/init.sql 保持一致。
-// 保留是为了让已有 MySQL 集群的用户可以只改 DSN 而无需改部署。
-var mysqlDDL = []string{
-	`CREATE TABLE IF NOT EXISTS biz_config (
-		biz               VARCHAR(64)  NOT NULL PRIMARY KEY,
-		base_url          VARCHAR(512) NOT NULL,
-		path_strip_prefix TINYINT(1)   NOT NULL DEFAULT 0,
-		enabled           TINYINT(1)   NOT NULL DEFAULT 1,
-		rules_json        JSON         NOT NULL,
-		metering_json     JSON         NULL,
-		created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	`CREATE TABLE IF NOT EXISTS audit_log (
-		id          BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
-		action      VARCHAR(64)  NOT NULL,
-		biz         VARCHAR(64)  NOT NULL DEFAULT '',
-		operator    VARCHAR(128) NOT NULL DEFAULT 'unknown',
-		remote_addr VARCHAR(64)  NOT NULL DEFAULT '',
-		detail      TEXT         NULL,
-		created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		INDEX idx_audit_created (created_at),
-		INDEX idx_audit_biz (biz, id)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-	`CREATE TABLE IF NOT EXISTS runtime_config (
-		cfg_key    VARCHAR(64)  NOT NULL PRIMARY KEY,
-		cfg_value  VARCHAR(512) NOT NULL,
-		operator   VARCHAR(128) NOT NULL DEFAULT 'unknown',
-		updated_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 }

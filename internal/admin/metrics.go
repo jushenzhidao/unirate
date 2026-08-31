@@ -47,7 +47,7 @@ import (
 // 与 Prometheus 抓取本身的语义相同。
 //
 // ── 依赖守卫 ────────────────────────────────────────────────────────
-// 指标不依赖 MySQL 也不依赖 config store，因此不套 requireDB / requireStore，
+// 指标不依赖 SoT 也不依赖 config store，因此不套 requireDB / requireStore，
 // 只需 requireMetrics 处理"网关以无指标模式装配"这一种情况（m == nil）。
 // 中间件顺序仍是 auth → allowMethods → 依赖守卫，与既有端点一致：
 // auth 在最外层，未鉴权者无法通过 401 / 503 的差异探测后端状态。

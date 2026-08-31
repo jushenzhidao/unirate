@@ -1,118 +1,52 @@
-// Package store 负责关系型存储的驱动选择、建表与方言差异。
+// Package store 负责 SQLite 存储的封装。
 //
-// 引入原因：原实现把 MySQL 硬编码进 admin 包的 SQL 字面量（两处
-// ON DUPLICATE KEY UPDATE），导致「换存储」必须改业务代码。本包把
-// 差异收敛到一处，admin 只依赖 Dialect 暴露的语义。
-//
-// 默认驱动改为 SQLite（modernc.org/sqlite，纯 Go 实现，
-// 可在 CGO_ENABLED=0 下静态链接，保住 Dockerfile 现有的构建形态）。
-// 选择依据：三张表（biz_config / audit_log / runtime_config）总量小，
-// 且业务流量路径完全不查关系库 —— 网关读配置走 Redis 快照。
-// 关系库只承担「配置写入的 SoT」与「审计问责」，单写者足够。
+// 设计决策：使用 SQLite 作为唯一存储后端，理由：
+//   - 三张表（biz_config / audit_log / runtime_config）总量小
+//   - 业务流量路径完全不查关系库 —— 网关读配置走 Redis 快照
+//   - 关系库只承担「配置写入的 SoT」与「审计问责」，单写者足够
+//   - 纯 Go 实现（modernc.org/sqlite），可在 CGO_ENABLED=0 下静态链接
 package store
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，无需 CGO
 )
 
-// Kind 存储类型
-type Kind string
-
-const (
-	// KindSQLite 纯 Go SQLite，默认
-	KindSQLite Kind = "sqlite"
-	// KindMySQL 外部 MySQL，用于已有集群复用
-	KindMySQL Kind = "mysql"
-)
-
-// DB 存储句柄，附带方言信息
+// DB 存储句柄
 type DB struct {
 	*sql.DB
-	Kind Kind
 }
 
-// Open 按 DSN 前缀推断驱动并打开连接。
+// Open 打开 SQLite 连接。
 //
-// 连接池参数按驱动区分，这不是调优偏好而是正确性要求：
-// SQLite 在 WAL 模式下允许多读单写，但并发写会撞 SQLITE_BUSY。
+// 连接池参数：SQLite 在 WAL 模式下允许多读单写，但并发写会撞 SQLITE_BUSY。
 // 把写连接限制为 1 是最可靠的规避方式 —— 由 database/sql 层排队，
 // 而不是依赖 busy_timeout 自旋重试。
-func Open(dsn string) (*DB, error) {
-	kind, driver, target, err := parseDSN(dsn)
+func Open(path string) (*DB, error) {
+	if path == "" {
+		path = defaultDBPath()
+	}
+
+	target := sqliteTarget(path)
+	db, err := sql.Open("sqlite", target)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db, err := sql.Open(driver, target)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", kind, err)
-	}
+	// 单连接：WAL 下写必须串行。读也走这条连接，
+	// 但读全部发生在管理面（低频），不构成瓶颈。
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	// SQLite 是进程内库，连接无需回收
+	db.SetConnMaxLifetime(0)
 
-	switch kind {
-	case KindSQLite:
-		// 单连接：WAL 下写必须串行。读也走这条连接，
-		// 但读全部发生在管理面（低频），不构成瓶颈。
-		db.SetMaxOpenConns(1)
-		db.SetMaxIdleConns(1)
-		// SQLite 是进程内库，连接无需回收
-		db.SetConnMaxLifetime(0)
-	case KindMySQL:
-		db.SetMaxOpenConns(16)
-		db.SetMaxIdleConns(8)
-		db.SetConnMaxLifetime(30 * time.Minute)
-	}
-
-	return &DB{DB: db, Kind: kind}, nil
-}
-
-// parseDSN 解析 DSN，返回存储类型、驱动名与驱动实际接受的目标串。
-//
-// 支持形式：
-//   - ""                          → 默认 SQLite，落盘 ./data/unirate.db
-//   - "sqlite:///abs/path.db"     → SQLite 指定路径
-//   - "/abs/path.db"、"./rel.db"  → 裸路径按 SQLite 处理
-//   - "file:...?_pragma=..."      → 直接透传给 SQLite 驱动
-//   - "user:pass@tcp(host)/db"    → MySQL
-//   - "mysql://..."               → MySQL（去掉 scheme 后透传）
-func parseDSN(dsn string) (Kind, string, string, error) {
-	d := strings.TrimSpace(dsn)
-
-	if d == "" {
-		return KindSQLite, "sqlite", sqliteTarget(defaultDBPath()), nil
-	}
-	if after, ok := strings.CutPrefix(d, "sqlite://"); ok {
-		p := after
-		if p == "" {
-			return "", "", "", fmt.Errorf("sqlite dsn missing path: %q", dsn)
-		}
-		return KindSQLite, "sqlite", sqliteTarget(p), nil
-	}
-	if strings.HasPrefix(d, "file:") {
-		// 已是驱动原生形式，调用方自行负责 pragma
-		return KindSQLite, "sqlite", d, nil
-	}
-	if after, ok := strings.CutPrefix(d, "mysql://"); ok {
-		return KindMySQL, "mysql", after, nil
-	}
-	// 裸路径 → SQLite；含 @ 或 tcp( → MySQL
-	if strings.Contains(d, "@tcp(") || strings.Contains(d, "@unix(") {
-		return KindMySQL, "mysql", d, nil
-	}
-	if strings.HasPrefix(d, "/") || strings.HasPrefix(d, "./") ||
-		strings.HasSuffix(d, ".db") || strings.HasSuffix(d, ".sqlite") {
-		return KindSQLite, "sqlite", sqliteTarget(d), nil
-	}
-	return "", "", "", fmt.Errorf("unrecognized DSN form: %q "+
-		"(use sqlite:///path.db, /path.db, or user:pass@tcp(host:3306)/db)", dsn)
+	return &DB{DB: db}, nil
 }
 
 // defaultDBPath 默认落盘位置。
@@ -138,12 +72,7 @@ func sqliteTarget(path string) string {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		_ = os.MkdirAll(dir, 0o750)
 	}
-	q := url.Values{}
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "busy_timeout(5000)")
-	q.Add("_pragma", "foreign_keys(on)")
-	q.Add("_pragma", "synchronous(NORMAL)")
-	return "file:" + path + "?" + q.Encode()
+	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)&_pragma=synchronous(NORMAL)", path)
 }
 
 // Ping 带超时的连通性检查

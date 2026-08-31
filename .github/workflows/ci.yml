@@ -58,7 +58,7 @@ jobs:
       # 先断言入口源码确实在仓库里。
       # 曾经踩过：.gitignore 里未锚定的 `gateway` / `mockupstream`
       # 把 cmd/gateway、cmd/mockupstream 整个目录忽略掉，checkout 出来没有 cmd/，
-      # go mod tidy 于是"正确地"删掉只被入口引用的 mysql 驱动，
+      # go mod tidy 于是"正确地"删掉只被入口引用的依赖，
       # 报错却只显示一段 go.mod diff，完全指不到真实原因。
       - name: 校验入口源码完整
         run: |

@@ -11,7 +11,7 @@ cp .env.example .env      # 生产环境务必修改 ADMIN_TOKEN 与各密码
 docker compose up -d --build
 ```
 
-主编排只含 `redis` / `mysql` / `gateway` 三个服务，不含任何测试组件，可直接用于生产部署。启动后通过 Admin API 注册真实上游业务域即可对外服务。
+主编排只含 `redis` / `gateway` 两个服务（配置 SoT 是网关进程内嵌的 SQLite），不含任何测试组件，可直接用于生产部署。启动后通过 Admin 页面或 Admin API 注册真实上游业务域即可对外服务。
 
 跑端到端验收（需要额外的测试夹具）：
 
@@ -58,7 +58,7 @@ curl http://localhost:28080/demo/v1/chat/completions \
 | P0-4 | 并发计数器用 INCR/DECR，异常路径不释放 → 永久泄漏 | ZSet + `request_id` 成员 + deadline 清扫；`defer` 无条件释放 | `TestConcurrencyNoLeak` |
 | P0-5 | 固定窗口先 INCR 后判断，超限不回滚 → 计数器被污染 | 两阶段单脚本原子求值：全部规则先只读试算，仅当全通过才统一写入 —— **不存在需要回滚的中间态** | `TestNoCounterPollution` |
 | P0-6 | Token ×1.2 预扣只扣不退 → 预算系统性提前 20% 耗尽 | 预扣—核销—退差三段式账本，`settle` 按差额修正 | `TestSettleRefundsOverCharge` |
-| P0-7 | Redis / MySQL / etcd 三套配置源并存，权威不明 | 收敛为 MySQL(SoT) → Redis(读取层+Pub/Sub) → 本地 atomic 缓存；**删除 etcd** | e2e 热更新链路 |
+| P0-7 | Spec 中 Redis / 关系库 / etcd 三套配置源并存，权威不明 | 收敛为 SQLite(SoT) → Redis(读取层+Pub/Sub) → 本地 atomic 缓存；**删除 etcd** | e2e 热更新链路 |
 | P1-8 | Key 用 `_` 连接，path 自身含 `_` `/` → 可碰撞、无法反解 | 分隔符改 `|`，维度值经 `safeVal()` 编码；窗口边界统一 epoch 秒；d/w 按业务时区对齐 | `TestKeyCollision` |
 | P1-9 | 直接信任 XFF → IP 维度可被随机 XFF 完全绕过 | `trusted_proxy_hops` 从右往左取值；默认 0（完全不信任）；token 来源与前缀剥离规则配置化 | `TestXFFSpoofingBlocked` |
 | P1-10 | Redis 故障时 L3/L4 一律 Fail-Open → Token 预算全失效 | 按 metric 分治：`request` 可 Fail-Open，`token`/并发降级为本地保守配额（总量÷实例数） | `TestDegradeMode` |
@@ -86,9 +86,9 @@ curl http://localhost:28080/demo/v1/chat/completions \
 └──────────────────────────────────────────────────────┘
       │                    │                  │
       ▼                    ▼                  ▼
-   Redis              MySQL(SoT)          上游服务
+   Redis             SQLite(SoT)          上游服务
  计数器/账本        配置 ← Admin写入
- 配置读取层
+ 配置读取层         (进程内嵌)
 ```
 
 限流判定的**全部规则合并为一次 Redis 往返**，单请求 RTT 与规则数解耦（解决评审 Advisory-4）。
@@ -131,7 +131,7 @@ curl -H "$T" http://127.0.0.1:29090/admin/audit                 # 审计日志
 curl -H "$T" http://127.0.0.1:29090/admin/snapshot              # 当前生效快照
 ```
 
-写入路径：校验 → MySQL 事务（配置 + 审计日志同事务）→ Redis 快照 → Pub/Sub 广播 → 各实例秒级热更新。轮询兜底防 Pub/Sub 丢消息。
+写入路径：校验 → SQLite 事务（配置 + 审计日志同事务）→ Redis 快照 → Pub/Sub 广播 → 各实例秒级热更新。轮询兜底防 Pub/Sub 丢消息。
 
 ## 关键环境变量
 

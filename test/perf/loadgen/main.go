@@ -241,7 +241,7 @@ func (h *harness) resetState() error {
 	if err := rc.resetStat(); err != nil {
 		return fmt.Errorf("config resetstat: %w", err)
 	}
-	// FLUSHDB 连带清掉了 Redis 里的配置快照，触发 admin reload 从 MySQL 重新发布，
+	// FLUSHDB 连带清掉了 Redis 里的配置快照，触发 admin reload 从 SoT 重新发布，
 	// 否则新起的实例或轮询会读到空配置
 	if h.cfg.AdminToken != "" {
 		req, _ := http.NewRequest(http.MethodPost, h.cfg.AdminURL+"/admin/reload", nil)
