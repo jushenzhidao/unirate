@@ -47,12 +47,11 @@ services:
 
   # 叠加 gateway 的测试配置：种子数据 + mock-upstream 依赖。
   #
-  # 种子数据机制的变化（原先靠一份测试专用 MySQL 镜像）：
-  #   SQLite 的库文件由 gateway 进程自己创建，没有 MySQL 官方镜像那种
-  #   /docker-entrypoint-initdb.d 初始化钩子。改为挂载 deploy/seed 并用
-  #   SEED_SQL_DIR 指路，gateway 建表后自行加载（internal/store/seed.go）。
+  # 种子数据机制：SQLite 的库文件由 gateway 进程自己创建，没有数据库镜像
+  #   那种 /docker-entrypoint-initdb.d 初始化钩子，因此改为挂载 deploy/seed
+  #   并用 SEED_SQL_DIR 指路，gateway 建表后自行加载（internal/store/seed.go）。
   #   种子 SQL 自带 ON CONFLICT upsert，重启重复执行是安全的 ——
-  #   不再需要先 docker compose down -v 清卷才能让 demo 生效。
+  #   无需先 docker compose down -v 清卷才能让 demo 生效。
   #
   # 生产编排既不挂载 deploy/seed 也不设 SEED_SQL_DIR，加载逻辑不可达。
   #

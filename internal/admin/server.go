@@ -48,9 +48,8 @@ type Options struct {
 
 // Server Admin 服务
 type Server struct {
-	// db 携带方言信息（见 internal/store）。改用 *store.DB 而非裸 *sql.DB
-	// 的原因：两处 upsert 的冲突子句在 MySQL 与 SQLite 间语法不同，
-	// 把方言绑在句柄上可以让新增 upsert 的人无法忘记处理差异。
+	// db 用 *store.DB 而非裸 *sql.DB：写事务的超时与 upsert 冲突子句
+	// 都由 store 层统一提供，避免各调用点自行拼 SQL 与设定超时。
 	db    *storepkg.DB
 	store *config.Store
 	log   *slog.Logger
@@ -113,7 +112,7 @@ func (s *Server) Handler() http.Handler {
 		s.auth(allowMethods(s.handleValidate, "POST")))
 	// Tier 1 运行策略：GET 读三态（只需 store），PUT 写需要 SoT。
 	// 两者共用一个 mux 项，因此守卫用 requireStore + requireDB 组合 ——
-	// 顺序上 DB 守卫只包住写路径，避免 MySQL 抖动时连"看一眼配置"都做不到。
+	// 顺序上 DB 守卫只包住写路径，避免 SoT 不可用时连"看一眼配置"都做不到。
 	mux.HandleFunc("/admin/policy",
 		s.auth(allowMethods(s.requireStore(s.handlePolicy), "GET", "PUT")))
 	mux.HandleFunc("/admin/policy/validate",
@@ -192,7 +191,7 @@ func allowMethods(next http.HandlerFunc, methods ...string) http.HandlerFunc {
 }
 
 // requireStore / requireDB 依赖守卫。
-// 管理面在配置尚未 Bootstrap 完成、或 MySQL 不可达时仍可能收到请求，
+// 管理面在配置尚未 Bootstrap 完成、或 SoT 不可用时仍可能收到请求，
 // 此时应返回 503 让调用方重试，而不是 nil 解引用把整个管理面打挂。
 func (s *Server) requireStore(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -258,7 +257,7 @@ func (s *Server) ipAllowed(r *http.Request) bool {
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.store.LoadFromMySQL(r.Context())
+	snap, err := s.store.LoadFromDB(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

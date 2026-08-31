@@ -174,18 +174,18 @@ func TestConcurrentPolicyRefreshAndRead(t *testing.T) {
 
 // TestIsMissingTable 表不存在必须被识别为「无覆盖项」而非致命错误。
 //
-// 老部署升级上来时 runtime_config 尚未创建。此时若报错，
-// 会连带让 biz_config 的加载失败（两者共用一次 LoadFromMySQL），
-// 结果是「加了个新功能，老部署起不来」。
+// 库文件是新建的、Migrate 尚未跑完时 runtime_config 可能还不存在。
+// 此时若报错，会连带让 biz_config 的加载失败（两者共用一次 LoadFromDB），
+// 结果是「加了个新功能，部署起不来」。
 func TestIsMissingTable(t *testing.T) {
 	cases := []struct {
 		msg  string
 		want bool
 	}{
-		{"Error 1146 (42S02): Table 'unirate.runtime_config' doesn't exist", true},
-		{"Table 'unirate.runtime_config' doesn't exist", true},
-		{"Error 1045: Access denied for user", false},
-		{"dial tcp 127.0.0.1:3306: connect: connection refused", false},
+		{"SQL logic error: no such table: runtime_config (1)", true},
+		{"no such table: runtime_config", true},
+		{"SQL logic error: no such column: cfg_key (1)", false},
+		{"attempt to write a readonly database", false},
 		{"", false},
 	}
 	for _, tc := range cases {

@@ -304,7 +304,7 @@ ssh -L 29090:127.0.0.1:29090 user@gateway-host
 | `6379` redis | 计数器 | 不映射宿主 | 仅容器网络内可达，且强制密码 |
 
 配置 SoT 是进程内嵌的 SQLite（`sqlite-data` 卷内的 `/var/lib/unirate/unirate.db`），
-**没有监听端口**，因此不在上表 —— 这也是它取代 MySQL 后减少的一整个攻击面。
+**没有监听端口**，因此不在上表 —— 它的访问控制退化为卷的文件权限。
 
 obs 端口不能和业务端口合并：`/metrics` 会泄露业务域列表与流量特征。
 e2e 有一条断言专门守这个（业务端口访问 `/metrics` 必须非 200）。
@@ -356,23 +356,19 @@ e2e 有一条断言专门守这个（业务端口访问 `/metrics` 必须非 200
 `PROXY_ADDR` `OBS_ADDR` `ADMIN_ADDR` `REDIS_ADDRS` `REDIS_DB` `REDIS_POOL_SIZE`
 `REDIS_TIMEOUT` `STORE_DSN` `TZ_OFFSET_SECONDS` `SHUTDOWN_GRACE`
 
-`STORE_DSN` 决定 SoT 后端，按形式判定（见 `internal/store/store.go` 的 `parseDSN`）：
+`STORE_DSN` 指定 SQLite 库文件路径（见 `internal/store/store.go` 的 `Open`）：
 
-| DSN 形式 | 后端 |
+| 取值 | 含义 |
 |----------|------|
-| 空 | SQLite，落 `./data/unirate.db`（`SQLITE_PATH` 可覆盖） |
-| `sqlite:///abs/path.db` | SQLite 指定路径 |
-| `/abs/path.db`、`./rel.db`、`*.db`、`*.sqlite` | SQLite |
-| `file:...?_pragma=...` | 直接透传 SQLite 驱动，pragma 自行负责 |
-| `user:pass@tcp(host:3306)/db`、`mysql://...` | MySQL |
+| 空 | 落 `./data/unirate.db`（`SQLITE_PATH` 可覆盖） |
+| `/abs/path.db`、`./rel.db` | 指定绝对或相对路径 |
 
-**无法识别的形式直接报错**，不做兜底猜测 —— 拼错的 DSN 静默退化成本地
-SQLite 文件，会让人以为连上了远端库，而配置写在了一个谁也不会去看的文件里。
+目录不存在时自动创建（0750）。WAL 与其余 pragma 由 `store.sqliteTarget`
+统一注入、不接受外部覆盖 —— 关掉 WAL 会让管理面的审计查询阻塞配置写入。
 
 compose 里设为 `/var/lib/unirate/unirate.db`（对应 `sqlite-data` 卷）。
-旧变量名 `MYSQL_DSN` 仍被识别，仅为兼容既有部署，新部署用 `STORE_DSN`。
 
-连接池按后端区分，这是正确性要求而非调优：SQLite 在 WAL 下允许多读单写，
+连接池参数是正确性要求而非调优：SQLite 在 WAL 下允许多读单写，
 并发写会撞 `SQLITE_BUSY`，因此写连接限制为 1，由 `database/sql` 排队，
 而不是依赖 `busy_timeout` 自旋重试。
 
@@ -515,10 +511,9 @@ docker compose restart gateway   # 重启时会重新幂等建表
   由 `SHUTDOWN_GRACE` 控制，默认 30s）
 - Redis 不要与网关同批重启
 
-SQLite 随网关进程共生，不构成独立的重启依赖 —— 这是它取代 MySQL 后
-少掉的一个协调环节。
+SQLite 随网关进程共生，不构成独立的重启依赖，也就少掉一个重启协调环节。
 
-**多实例部署必须把 `STORE_DSN` 指向共享 MySQL。** 配置读取路径本身没问题：
+**多实例部署必须把管理面写入固定到单一实例。** 配置读取路径本身没问题：
 所有实例都从 Redis 快照读，不查 SoT，Pub/Sub 秒级同步（见 §6.4）。
 问题在写入侧 —— SQLite 是进程本地文件，各实例各持一份：
 
@@ -526,6 +521,14 @@ SQLite 随网关进程共生，不构成独立的重启依赖 —— 这是它�
 - 该实例的库成为事实上的唯一 SoT，其余实例的库是永不更新的死数据
 - 审计日志按请求落点散落各实例，问责记录不完整
 - 任一实例重启并从本地库 bootstrap 时，会用自己那份陈旧数据覆盖 Redis 快照
+
+可行做法（按推荐程度）：
+
+1. **指定一个写实例**：只有它映射 admin 端口（9090），其余实例的 admin
+   端口不对外暴露。其余实例只读 Redis 快照，本地库仅作为空壳。
+2. **共享库文件卷**：把 `sqlite-data` 挂到同一网络存储上。仅在存储提供
+   完整 POSIX 文件锁语义时才成立；NFS 常见配置下锁不可靠，会出现库损坏，
+   除非已确认存储行为，否则不要用这条。
 
 单实例部署不受影响，这也是默认形态。
 
@@ -568,8 +571,8 @@ docker compose ps redis
 
 ### 6.2 SoT（SQLite）不可用会怎样
 
-SQLite 是进程内库，不存在「数据库服务挂了」这种独立故障 —— 取代 MySQL 后
-少掉的正是这一整类故障面。剩下的真实形态是**卷不可写**（权限错误、磁盘满）：
+SQLite 是进程内库，不存在「数据库服务挂了」这种独立故障。
+剩下的真实形态是**卷不可写**（权限错误、磁盘满）：
 
 - **业务流量不受影响**：网关读配置走 Redis 快照，不查 SoT
 - **管理面写入失败**：`/admin/bizs` PUT、`/admin/policy` PUT 返回 5xx

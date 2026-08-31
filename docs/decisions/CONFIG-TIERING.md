@@ -10,7 +10,7 @@
 | 层 | 判据 | 归属 | 变更方式 |
 |----|------|------|----------|
 | **Tier 0 · 引导参数** | 进程启动前必须确定，或改动需重建连接/监听 | 环境变量，且**部分必须无默认值** | 重启 |
-| **Tier 1 · 运行策略** | 可安全热替换，误配影响可逆，且运维确有调整需求 | **管理页面**（MySQL SoT + 热更新） | 页面即时生效 |
+| **Tier 1 · 运行策略** | 可安全热替换，误配影响可逆，且运维确有调整需求 | **管理页面**（SQLite SoT + 热更新） | 页面即时生效 |
 | **Tier 2 · 业务规则** | 已实现的动态数据 | 管理页面（已有） | 页面即时生效 |
 
 ---
@@ -28,8 +28,6 @@
 | 变量 | 现状 | 要求 |
 |------|------|------|
 | `ADMIN_TOKEN` | compose 默认 `change-me-...`（**可用，实测 200**） | **移除默认值**；启动时校验：非空 + ≥32 字符 + 不在弱值黑名单 |
-| `MYSQL_PASSWORD` | compose 默认 `unirate_pass` | **移除默认值**（生产必须显式提供） |
-| `MYSQL_ROOT_PASSWORD` | compose 默认 `unirate_root_pass` | **移除默认值** |
 | `REDIS_PASSWORD` | compose 默认 `unirate_redis_pass` | **移除默认值** |
 | `GRAFANA_PASSWORD` | compose 默认 `admin` | **移除默认值** |
 
@@ -48,7 +46,7 @@
 | `PROXY_ADDR` / `OBS_ADDR` | `:8080` / `:9091` | 改监听地址需重建 listener |
 | `ADMIN_ADDR` | `127.0.0.1:9090` | 同上；且此默认值是安全设计（防一键部署暴露管理面），**不得放宽** |
 | `REDIS_ADDRS` / `REDIS_DB` | `127.0.0.1:6379` / `0` | 改动需重建连接池 |
-| `MYSQL_DSN` | 空（无 MySQL 则降级为纯 Redis 读取层） | 同上 |
+| `STORE_DSN` | 空（落本地 `data/unirate.db`） | 库文件路径在 `store.Open` 时确定，改动需重开连接 |
 | `REDIS_POOL_SIZE` | `256` | 池大小需重建连接池 |
 | `ADMIN_ALLOW_CIDRS` | compose 给内网网段 | **刻意留在环境变量**：若可从页面改，攻击者拿到令牌后能自行放开来源限制，等于自毁第二重防线 |
 | `VERSION` / `LOG_LEVEL` | `dev` / `info` | LOG_LEVEL 可考虑升 Tier 1（见下） |
@@ -87,7 +85,7 @@
 
 ## 落地要求
 
-1. **Tier 1 配置需持久化到 MySQL**，走既有 `MySQL(SoT) → Redis → 本地 atomic.Pointer` 链路，与业务规则一致，不新造机制
+1. **Tier 1 配置需持久化到 SQLite**，走既有 `SQLite(SoT) → Redis → 本地 atomic.Pointer` 链路，与业务规则一致，不新造机制
 2. **每次变更写审计日志**（复用既有 `audit_log` 表），管理面无审计等于无问责
 3. **每项都要有上下限校验**，且校验在**写入前**完成（复用 `/admin/rules/validate` 的设计思路）
 4. **页面必须显示"当前值 / 默认值 / 是否被覆盖"**三态，让运维知道自己改了什么

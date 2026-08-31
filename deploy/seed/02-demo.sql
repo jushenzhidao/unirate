@@ -3,9 +3,8 @@
 -- 仅由 docker-compose.test.yml 挂载到 gateway 的 SEED_SQL_DIR 下加载，
 -- 生产编排不挂载本目录，因此不会进入生产库。
 --
--- 迁移说明：本文件替代原 deploy/mysql/testdata/02-demo.sql。
--- MySQL 版用 JSON_ARRAY/JSON_OBJECT 构造，SQLite 无这些函数，
--- 直接写 JSON 文本 —— 应用层读出后仍是 json.Unmarshal，语义等价。
+-- JSON 字段直接写文本字面量（SQLite 无 JSON_ARRAY/JSON_OBJECT 构造函数），
+-- 应用层读出后走 json.Unmarshal，与结构化构造语义等价。
 --
 -- e2e（test/e2e/run.sh）大量用例依赖此业务域及其规则 id/window/limit，
 -- 修改任一数值会直接使断言失效，调整前请同步核对 run.sh。

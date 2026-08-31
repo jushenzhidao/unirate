@@ -64,13 +64,13 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  # MySQL 已移除。配置 SoT 改为网关进程内嵌的 SQLite（internal/store），
-  # 数据落在下方 sqlite-data 卷。默认编排从 3 个容器降到 2 个。
+  # 配置 SoT 为网关进程内嵌的 SQLite（internal/store），数据落在下方
+  # sqlite-data 卷，因此编排只有 redis + gateway 两个容器。
   #
   # 取舍：SQLite 是单写者，因此不能横向扩多个「写实例」——
   # Admin 写入必须只有一个副本承担。这对本系统成立：配置写入是低频人工操作，
   # 而限流判定完全走 Redis，与 SQLite 无关，因此代理面依然可以任意水平扩展。
-  # 若将来确实需要多副本同时写配置，那时才需要退回外置 RDBMS。
+  # 若将来确实需要多副本同时写配置，那时才需要引入外置 RDBMS。
 
   gateway:
     build:
@@ -83,7 +83,7 @@ services:
     # 因此把 mock 移出主编排后必须在此声明，否则该变量无人读取、用法失效。
     image: ${GATEWAY_IMAGE:-unirate/gateway:${VERSION:-dev}}
     pull_policy: ${GATEWAY_PULL_POLICY:-build}
-    container_name: unirate-gateway
+    container_name: unirate
     depends_on:
       redis:
         condition: service_healthy
@@ -176,5 +176,5 @@ networks:
     driver: bridge
 
 volumes:
-  # SQLite 配置 SoT（替代原 mysql-data）
+  # SQLite 配置 SoT 的持久化卷
   sqlite-data:

@@ -249,7 +249,7 @@ else if (k === 'html') throw new Error('innerHTML is forbidden: use text');
 
 代码印证：`policy.go:54` 的 `ValidatePolicyOverrides` 在 `policy.go:80` 的
 `s.db == nil` 守卫**之前**执行，且守卫刻意放在 handler 内而非中间件层
-（GET 在 MySQL 抖动时仍可读配置）。
+（GET 在 SoT 抖动时仍可读配置）。
 
 ### `overridden_by_env` 三态准确性
 
@@ -319,7 +319,7 @@ lead 的追问是「能否区分『env 未设置』与『env 设成与默认值�
 
 `make init` 未实跑（会覆盖 `.env` 打断其他人），改为静态审阅：
 `scripts/init-env.sh` 逻辑正确（`.env` 存在则拒绝覆盖、`openssl rand -base64 24` 生成、
-`chmod 600`），文档 §1.2 对「为何拒绝覆盖」的解释（凭证与 MySQL 数据卷不匹配）准确。
+`chmod 600`），文档 §1.2 对「为何拒绝覆盖」的解释（凭证与已有数据卷不匹配）准确。
 
 ---
 
@@ -345,7 +345,7 @@ lead 的追问是「能否区分『env 未设置』与『env 设成与默认值�
 |----------|------|------|
 | Happy-path 偏差 | **通过** | 异常路径有测试：Redis 故障降级（`degrade_test.go` 212 行）、越界配置、鉴权失败、并发竞争、上游超时。e2e 含 Redis 停机恢复全流程 |
 | 沉默逻辑错误 | **通过** | 变异测试 4 直接验证：破坏两阶段提交后 `TestTkAdmitDoesNotBreakLaterRuleCommit` 报「plans 空洞使 Phase 2 提前终止」——这类静默错误有测试守护 |
-| 幻觉依赖/接口 | **通过** | `go.mod` 仅 3 个直接依赖（`go-redis`、`go-sql-driver/mysql`、`google/uuid` 等），`go build` 全绿，无不存在的 API 调用 |
+| 幻觉依赖/接口 | **通过** | `go.mod` 直接依赖数量少（`go-redis`、`modernc.org/sqlite`、`otel` 等），`go build` 全绿，无不存在的 API 调用 |
 | 缺失系统上下文 | **通过** | 多实例场景被显式处理：`metrics.go` 顶部论证了「为何不做后端预聚合」（多实例采样基线不一致）；`instances` 配置用于降级期配额分摊 |
 | 性能盲区 | **通过** | 有压测基线（4 个 JSON 归档）、ADR-008 定义了判定阈值、`evalsha=11.35µs` 有埋点、双侧 CPU 归因强制要求 |
 | 静默缺失 | **部分**（见 P2-1） | 文档引用的 `unirate_degraded_total` 指标不存在，排障时会拿到空输出而无任何报错——这正是「静默缺失」的形态，只是发生在文档侧而非代码侧 |

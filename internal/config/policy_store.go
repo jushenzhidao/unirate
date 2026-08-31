@@ -11,7 +11,7 @@ import (
 
 // Tier 1 策略在 Store 上的读写与订阅。
 //
-// 与业务规则共用同一条发布链路（LoadFromMySQL → publish → Pub/Sub / poll），
+// 与业务规则共用同一条发布链路（LoadFromDB → publish → Pub/Sub / poll），
 // 因此这里没有任何独立的轮询或订阅逻辑 —— 复用是刻意的，
 // 新造一套配置通道意味着两套一致性语义、两处可能不同步。
 //
@@ -130,7 +130,7 @@ func (s *Store) refreshPolicy(overrides map[string]string) {
 //
 // 表不存在时返回空集而非报错：老部署升级上来时该表尚未创建，
 // 此时应以 env/默认值正常服务，而不是让整个配置加载失败
-// （biz_config 的规则加载与之共用一次 LoadFromMySQL）。
+// （biz_config 的规则加载与之共用一次 LoadFromDB）。
 func loadPolicyOverrides(ctx context.Context, db *sql.DB) (map[string]string, error) {
 	if db == nil {
 		return nil, nil
@@ -158,13 +158,14 @@ func loadPolicyOverrides(ctx context.Context, db *sql.DB) (map[string]string, er
 	return out, nil
 }
 
-// isMissingTable 识别 MySQL 1146 (ER_NO_SUCH_TABLE)。
-// 用错误文本匹配而非 driver 类型断言，避免为此在 config 包引入
-// go-sql-driver 依赖（该驱动目前只在 main 里做匿名 import）。
+// isMissingTable 识别 SQLite 的「表不存在」错误（SQLITE_ERROR: no such table）。
+//
+// 用错误文本匹配而非 driver 类型断言：modernc.org/sqlite 把该错误包成
+// 通用 *sqlite.Error，错误码需要额外类型依赖才能取到，而文本形态
+// 由 SQLite 内核固定输出，稳定性足够。
 func isMissingTable(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "Error 1146") || strings.Contains(msg, "doesn't exist")
+	return strings.Contains(err.Error(), "no such table")
 }

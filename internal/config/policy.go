@@ -11,7 +11,7 @@ import (
 // 这一层的判据是「可安全热替换、误配影响可逆」，因此归管理页面而非环境变量。
 // 持久化链路完全复用业务规则那条：
 //
-//	MySQL runtime_config (SoT) → Redis 快照 → 本地 atomic.Pointer
+//	SQLite runtime_config (SoT) → Redis 快照 → 本地 atomic.Pointer
 //
 // 关键设计：Redis 快照里存的是**覆盖项原始 map**而不是解析后的 Policy。
 // 原因是环境变量是「每实例本地事实」，不同实例的 env 可以不同；
@@ -132,10 +132,10 @@ func (p *Policy) Clone() *Policy {
 // ResolvePolicy 按 页面 > 环境变量 > 默认 解析出生效策略。
 //
 //	base      —— 已由环境变量解析过的策略（env 未设置的项即为默认值）
-//	overrides —— 来自 MySQL runtime_config 的页面覆盖项
+//	overrides —— 来自 runtime_config 表的页面覆盖项
 //
 // 单项非法不会拖垮整体：记入 problems 并回退到 base 的取值。
-// 理由与 store.LoadFromMySQL 处理坏规则一致 —— 一个字段写错不应让网关整体失去配置。
+// 理由与 store.LoadFromDB 处理坏规则一致 —— 一个字段写错不应让网关整体失去配置。
 func ResolvePolicy(base *Policy, overrides map[string]string) (*Policy, []string) {
 	if base == nil {
 		base = DefaultPolicy()

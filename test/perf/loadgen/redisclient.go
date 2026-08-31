@@ -139,7 +139,7 @@ func (r *respConn) resetStat() error {
 // 安全说明：配置快照存放在 Redis（unirate:config:snapshot），
 // FLUSHDB 会连带清掉它。网关本地有 atomic.Pointer 缓存故不会立即失效，
 // 但为稳妥起见，压测流程在 FLUSHDB 后调用 admin /admin/reload
-// 让网关从 MySQL(SoT) 重新加载并重新发布快照。
+// 让网关从 SQLite(SoT) 重新加载并重新发布快照。
 func (r *respConn) flushDB() error {
 	_, err := r.do("FLUSHDB")
 	return err

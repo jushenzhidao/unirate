@@ -84,7 +84,7 @@ var lookupIP = net.LookupIP
 //
 // 三层判定，缺一不可：
 //  1. IP 字面量 → 直接查 CIDR；
-//  2. 无点主机名（如容器服务名 redis、mysql）→ 容器网络内必为内网，直接拒；
+//  2. 无点主机名（如容器服务名 redis、upstream）→ 容器网络内必为内网，直接拒；
 //  3. FQDN → 必须解析 DNS 并检查**全部**返回地址。
 //     这是防 DNS rebinding 的关键：攻击者可让 evil.com 解析到 127.0.0.1，
 //     只看域名字符串是拦不住的。解析失败同样视为内网（拒绝优于放过）。
@@ -200,7 +200,7 @@ func (r *Resolver) HeaderName() string { return r.headerName }
 
 // Resolve 按 P1 配置面板 > P2 请求头 > P3 环境变量 的优先级解析上游。
 func (r *Resolver) Resolve(biz string, headerVal string) (*Target, error) {
-	// P1: 配置面板（MySQL → Redis 读取层）
+	// P1: 配置面板（SoT → Redis 读取层）
 	if r.src != nil {
 		if base, strip, ok := r.src.Upstream(biz); ok && base != "" {
 			if err := r.policy.Validate(base, false); err != nil {

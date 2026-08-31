@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/unirate/gateway/internal/admin"
@@ -81,71 +80,48 @@ func run() error {
 		log.Info("redis connected", "addrs", rt.RedisAddrs)
 	}
 
-	// 关系库默认 SQLite（嵌入进程，无外部依赖），DSN 形如 mysql://... 时切 MySQL。
-	// 与原实现的关键差异：DSN 为空不再降级为「只读 + 管理面禁用」，
-	// 而是落盘到本地 SQLite。原行为让默认部署失去配置写入能力，
-	// 这对一个需要配规则才能工作的网关是错误的默认值。
+	// SQLite 嵌入进程，无外部依赖。DSN 为空时落盘到默认路径
+	// （data/unirate.db），保证默认部署即具备配置写入能力。
 	sdb, err := store.Open(rt.StoreDSN)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = sdb.Close() }()
 
-	// sotDown 表示启动时 SoT 已确认不可达（仅 MySQL 会走到这里，
-	// SQLite 不可用是直接 fatal）。后续建表与加载据此跳过。
-	sotDown := false
-
+	// SQLite 打不开通常是目录权限或磁盘满，属于必须立刻暴露的部署错误：
+	// 库在进程内，没有「稍后重连」这一说，继续启动只会让管理面
+	// 在第一次写入时才报错，且错误现场已丢失。
 	if err := sdb.Ping(ctx); err != nil {
-		// SQLite 打不开通常是目录权限或磁盘满，属于必须立刻暴露的部署错误；
-		// MySQL 不可达则可以靠 Redis 快照先服务存量配置。
-		if sdb.Kind == store.KindSQLite {
-			return fmt.Errorf("sqlite unusable (check volume permissions): %w", err)
-		}
-		log.Error("sot database unreachable at startup; falling back to redis snapshot",
-			"kind", string(sdb.Kind), "err", err)
-		sotDown = true
-	} else {
-		log.Info("store connected", "kind", string(sdb.Kind))
+		return fmt.Errorf("sqlite unusable (check volume permissions): %w", err)
+	}
+	log.Info("store connected", "path", rt.StoreDSN)
+
+	// 幂等建表。首次启动必须建表，否则管理面第一次写入即失败。
+	migCtx, migCancel := context.WithTimeout(ctx, 30*time.Second)
+	err = sdb.Migrate(migCtx)
+	migCancel()
+	if err != nil {
+		return fmt.Errorf("schema migrate: %w", err)
 	}
 
-	// 幂等建表。SQLite 首次启动必须建表，否则管理面第一次写入即失败。
+	// 种子数据加载。仅当 SEED_SQL_DIR 显式设置时生效 ——
+	// 生产编排不设置该变量，测试编排挂载 deploy/seed。
 	//
-	// 已知不可达时跳过：MySQL 抖动不应让进程退出，否则上面刚建立的
-	// 「靠 Redis 快照继续服务」降级路径会被这里的 return 抵消掉。
-	if !sotDown {
-		migCtx, migCancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := sdb.Migrate(migCtx); err != nil {
-			migCancel()
-			if sdb.Kind == store.KindSQLite {
-				return fmt.Errorf("schema migrate: %w", err)
-			}
-			log.Error("schema migrate failed; continuing with redis snapshot", "err", err)
-		} else {
-			migCancel()
-
-			// 种子数据加载。仅当 SEED_SQL_DIR 显式设置时生效 ——
-			// 生产编排不设置该变量，测试编排挂载 deploy/seed。
-			//
-			// 替代了原 MySQL 镜像的 /docker-entrypoint-initdb.d 机制：
-			// SQLite 的库文件由本进程创建，没有第三方镜像的初始化钩子可用。
-			// 失败必须致命：种子加载不了意味着 e2e 断言的前置数据缺失，
-			// 静默跳过会让失败表现为「限流逻辑不对」，排查成本极高。
-			if dir := os.Getenv(store.SeedDirEnv); dir != "" {
-				seedCtx, seedCancel := context.WithTimeout(ctx, 30*time.Second)
-				err := sdb.LoadSeeds(seedCtx, dir)
-				seedCancel()
-				if err != nil {
-					return fmt.Errorf("load seeds from %s: %w", dir, err)
-				}
-				log.Info("seed data loaded", "dir", dir)
-			}
+	// 失败必须致命：种子加载不了意味着 e2e 断言的前置数据缺失，
+	// 静默跳过会让失败表现为「限流逻辑不对」，排查成本极高。
+	if dir := os.Getenv(store.SeedDirEnv); dir != "" {
+		seedCtx, seedCancel := context.WithTimeout(ctx, 30*time.Second)
+		err := sdb.LoadSeeds(seedCtx, dir)
+		seedCancel()
+		if err != nil {
+			return fmt.Errorf("load seeds from %s: %w", dir, err)
 		}
+		log.Info("seed data loaded", "dir", dir)
 	}
 
 	db := sdb.DB
 
 	cfgStore := config.NewStore(db, rdb, log)
-	cfgStore.SetDBKind(string(sdb.Kind))
 	defer cfgStore.Close()
 
 	// 环境变量层作为 Tier 1 策略的 base，必须在 Bootstrap 之前注入 ——

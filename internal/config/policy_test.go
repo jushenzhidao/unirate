@@ -133,7 +133,7 @@ func TestPolicyPriorityPageOverEnv(t *testing.T) {
 
 // TestResolvePolicyIsolatesBadEntry 单项非法只影响该项，不得拖垮整份策略。
 //
-// 与 store.LoadFromMySQL 处理坏规则的策略一致：一个字段写错
+// 与 store.LoadFromDB 处理坏规则的策略一致：一个字段写错
 // 不应让网关整体失去配置（那会造成远大于原始错误的故障）。
 func TestResolvePolicyIsolatesBadEntry(t *testing.T) {
 	base := DefaultPolicy()
