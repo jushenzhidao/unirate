@@ -27,6 +27,9 @@
 #
 # GHCR 语义化 tag 不带 v 前缀（release.yml 用的是去掉 v 的 semver 输出），
 # 写成 :v0.1.4 会 404。
+#
+# 监控方案：Logfire 云端监控，otel-collector 旁路抓取指标并转发。
+# 关键告警需在 Logfire 侧配置（见 otel-collector 服务注释）。
 
 x-logging: &default-logging
   driver: json-file
@@ -149,58 +152,17 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  prometheus:
-    # 抓取配置与告警规则内置镜像（deploy/prometheus/Dockerfile）。
-    build:
-      context: ./deploy/prometheus
-    image: unirate/prometheus:${VERSION:-dev}
-    container_name: unirate-prometheus
-    volumes:
-      - prom-data:/prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=7d
-      - --web.enable-lifecycle
-    ports:
-      - "${PROM_PORT:-29092}:9090"
-    depends_on: [gateway]
-    networks: [unirate]
-    logging: *default-logging
-    restart: unless-stopped
-    profiles: [obs]
-
-  grafana:
-    # 数据源、面板 provider 与面板 JSON 内置镜像（deploy/grafana/Dockerfile）。
-    build:
-      context: ./deploy/grafana
-    image: unirate/grafana:${VERSION:-dev}
-    container_name: unirate-grafana
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD 未设置。请先执行 make init 生成含强随机凭证的 .env}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-    volumes:
-      - grafana-data:/var/lib/grafana
-    ports:
-      - "${GRAFANA_PORT:-29093}:3000"
-    depends_on: [prometheus]
-    networks: [unirate]
-    logging: *default-logging
-    restart: unless-stopped
-    profiles: [obs]
-
   # Logfire 接入：Collector 旁路抓取 gateway:9091/metrics 转发到 Logfire。
   # Go 代码零改动 —— /metrics 已是标准 Prometheus text exposition v0.0.4。
   #
-  # 与 obs profile 并行存在，互不干扰：
-  #   docker compose --profile logfire up -d   # 只发 Logfire（1 个容器）
-  #   docker compose --profile obs up -d       # 只用本地 Prometheus+Grafana
-  # 两个 profile 同时开也可以，用于迁移期双跑比对。
-  #
-  # 迁移必办事项：deploy/prometheus/rules.yml 里的告警需在 Logfire 侧重建，
-  # 其中 RateLimiterDegraded（unirate_redis_breaker_open > 0）**必须保留**——
-  # 限流静默失效没有任何用户可见症状，丢了这条等于丢了最重要的告警。
+  # 已从 deploy/prometheus/rules.yml 迁移的关键告警（必须在 Logfire 侧配置）：
+  # 1. RateLimiterDegraded (unirate_redis_breaker_open > 0, for 1m) - CRITICAL
+  #    限流静默失效没有任何用户可见症状，这是最重要的告警。
+  # 2. DegradedDecisionRate (sum(rate(unirate_degraded_decisions_total[5m])) > 1, for 2m)
+  # 3. HighRejectRate (reject / total > 0.3, for 5m)
+  # 4. RedisErrorsElevated (sum(rate(unirate_redis_errors_total[5m])) > 5, for 2m)
+  # 5. ConcurrencyLeakSuspected (min_over_time(unirate_concurrency_in_flight[15m]) > 10 且无流量, for 10m) - CRITICAL
+  # 6. ConfigStale (unirate_config_version == 0, for 5m) - CRITICAL
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.115.1}
     container_name: unirate-otel-collector
@@ -208,16 +170,7 @@ services:
     volumes:
       - ./deploy/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
     environment:
-      # Logfire write token 属于 Tier 0 凭证：只从 .env 读取，绝不给默认值。
-      # 是本文件唯一无法做「缺失即失败」硬校验的凭证，两条路都实测不可行：
-      #   1. 此处 ${VAR:?err} —— compose 插值发生在 profile 过滤之前，
-      #      未设置会让所有 compose 命令失败，可选组件反而卡死整个栈；
-      #   2. collector.yaml 里 ${env:VAR:?err} —— otelcol v0.115.1 不支持，
-      #      会把整串当变量名，连填了 token 都起不来。
-      # 现状：缺失时 collector.yaml 注入占位串 LOGFIRE_TOKEN-NOT-SET，
-      # Logfire 返 401，日志里搜该串即可定位。属已知可诊断降级，非静默失效。
-      # 本服务刻意不设 entrypoint —— 不为此再套一层 shell 包装。
-      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
+      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:?LOGFIRE_TOKEN 未设置。请在 .env 中配置 Logfire write token}
       # 美区 logfire-us / 欧区 logfire-eu，按账号所属区域选择
       LOGFIRE_ENDPOINT: ${LOGFIRE_ENDPOINT:-https://logfire-us.pydantic.dev}
       # 指标降频的唯一正确手段：拉长抓取间隔。
@@ -239,7 +192,6 @@ services:
     networks: [unirate]
     logging: *default-logging
     restart: unless-stopped
-    profiles: [logfire]
 
 networks:
   unirate:
@@ -248,5 +200,3 @@ networks:
 volumes:
   # SQLite 配置 SoT（替代原 mysql-data）
   sqlite-data:
-  prom-data:
-  grafana-data:

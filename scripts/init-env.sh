@@ -47,7 +47,7 @@ gen() {
 
 ADMIN_TOKEN="$(gen 24)"
 REDIS_PASSWORD="$(gen 18)"
-GRAFANA_PASSWORD="$(gen 18)"
+LOGFIRE_TOKEN="$(gen 24)"
 
 # 生成后自检：ADMIN_TOKEN 必须真的够长。
 # 若上面的 tr 过滤过于激进导致长度不足，宁可在这里失败，
@@ -81,13 +81,11 @@ PROXY_PORT=$(read_port PROXY_PORT 28080)
 OBS_PORT=$(read_port OBS_PORT 29091)
 # Admin 端口只绑 127.0.0.1，不对外暴露。不要改成 0.0.0.0。
 ADMIN_PORT=$(read_port ADMIN_PORT 29090)
-PROM_PORT=$(read_port PROM_PORT 29092)
-GRAFANA_PORT=$(read_port GRAFANA_PORT 29093)
 
 # ---- 凭证（强随机生成，勿手改为弱值）----
 ADMIN_TOKEN=${ADMIN_TOKEN}
 REDIS_PASSWORD=${REDIS_PASSWORD}
-GRAFANA_PASSWORD=${GRAFANA_PASSWORD}
+LOGFIRE_TOKEN=${LOGFIRE_TOKEN}
 
 # 配置 SoT 走容器内 SQLite（见 compose 的 STORE_DSN），不需要数据库凭证。
 # 若要改回外置 MySQL，在此填 STORE_DSN 并自行管理该库的凭证。
@@ -108,6 +106,14 @@ VERSION=dev
 # 注意 GHCR 的语义化 tag 不带 v 前缀，写成 v0.1.4 会 404。
 # GATEWAY_IMAGE=ghcr.io/jushenzhidao/unirate:latest
 # GATEWAY_PULL_POLICY=always
+
+# ---- Logfire 监控（默认启用）----
+# 按账号区域选择：美区 logfire-us / 欧区 logfire-eu，写错会一直 4xx。
+LOGFIRE_ENDPOINT=https://logfire-us.pydantic.dev
+OTEL_SCRAPE_INTERVAL=15s
+OTEL_LOG_LEVEL=warn
+OTEL_DEBUG_VERBOSITY=basic
+DEPLOY_ENV=dev
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -115,7 +121,7 @@ chmod 600 "$ENV_FILE"
 printf '%s已生成 %s%s（权限 600，已被 .gitignore 排除）\n\n' "$c_g" "$ENV_FILE" "$c_0"
 printf '  ADMIN_TOKEN         %d 字符\n' "${#ADMIN_TOKEN}"
 printf '  REDIS_PASSWORD      %d 字符\n' "${#REDIS_PASSWORD}"
-printf '  GRAFANA_PASSWORD    %d 字符\n\n' "${#GRAFANA_PASSWORD}"
+printf '  LOGFIRE_TOKEN       %d 字符\n\n' "${#LOGFIRE_TOKEN}"
 printf '下一步：\n'
 printf '  docker compose up -d --build\n'
 printf '  ./test/e2e/run.sh\n\n'
