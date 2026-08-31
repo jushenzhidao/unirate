@@ -107,12 +107,10 @@ VERSION=dev
 # GATEWAY_IMAGE=ghcr.io/jushenzhidao/unirate:latest
 # GATEWAY_PULL_POLICY=always
 
-# ---- Logfire 监控（默认启用）----
-# 按账号区域选择：美区 logfire-us / 欧区 logfire-eu，写错会一直 4xx。
-LOGFIRE_ENDPOINT=https://logfire-us.pydantic.dev
+# ---- Logfire 云端监控（可选）----
+# 按账号区域选择：美区 logfire-us / 欧区 logfire-eu
+LOGFIRE_ENDPOINT=https://logfire-api.pydantic.dev/v1/metrics
 OTEL_SCRAPE_INTERVAL=15s
-OTEL_LOG_LEVEL=warn
-OTEL_DEBUG_VERBOSITY=basic
 DEPLOY_ENV=dev
 EOF
 

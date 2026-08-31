@@ -28,8 +28,8 @@
 # GHCR 语义化 tag 不带 v 前缀（release.yml 用的是去掉 v 的 semver 输出），
 # 写成 :v0.1.4 会 404。
 #
-# 监控方案：Logfire 云端监控，otel-collector 旁路抓取指标并转发。
-# 关键告警需在 Logfire 侧配置（见 otel-collector 服务注释）。
+# 监控方案：Logfire 云端监控，网关内嵌 OTel SDK 直接推送指标。
+# 关键告警需在 Logfire 侧配置（见 gateway 服务的环境变量注释）。
 
 x-logging: &default-logging
   driver: json-file
@@ -127,6 +127,25 @@ services:
       SHUTDOWN_GRACE: 30s
       LOG_LEVEL: ${LOG_LEVEL:-info}
       VERSION: ${VERSION:-dev}
+
+      # Logfire 云端监控（可选）
+      # 设置 LOGFIRE_TOKEN 后网关内嵌的 OTel SDK 会直接推送指标到 Logfire。
+      # 未设置时仅暴露 /metrics 端点供本地调试。
+      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
+      # 美区 logfire-us / 欧区 logfire-eu（API endpoint 自动补全路径）
+      LOGFIRE_ENDPOINT: ${LOGFIRE_ENDPOINT:-https://logfire-api.pydantic.dev/v1/metrics}
+      # 推送间隔（必须 >= 10s，过短会被 Logfire 限流）
+      OTEL_SCRAPE_INTERVAL: ${OTEL_SCRAPE_INTERVAL:-15s}
+      DEPLOY_ENV: ${DEPLOY_ENV:-dev}
+      #
+      # 关键告警（必须在 Logfire 侧配置）：
+      # 1. RateLimiterDegraded (unirate_redis_breaker_open > 0, for 1m) - CRITICAL
+      #    限流静默失效没有任何用户可见症状，这是最重要的告警。
+      # 2. DegradedDecisionRate (sum(rate(unirate_degraded_decisions_total[5m])) > 1, for 2m)
+      # 3. HighRejectRate (reject / total > 0.3, for 5m)
+      # 4. RedisErrorsElevated (sum(rate(unirate_redis_errors_total[5m])) > 5, for 2m)
+      # 5. ConcurrencyLeakSuspected (min_over_time(unirate_concurrency_in_flight[15m]) > 10 且无流量, for 10m) - CRITICAL
+      # 6. ConfigStale (unirate_config_version == 0, for 5m) - CRITICAL
     ports:
       - "${PROXY_PORT:-28080}:8080"
       - "${OBS_PORT:-29091}:9091"
@@ -147,47 +166,6 @@ services:
       interval: 10s
       timeout: 3s
       start_period: 10s
-      retries: 3
-    networks: [unirate]
-    logging: *default-logging
-    restart: unless-stopped
-
-  # Logfire 接入：Collector 旁路抓取 gateway:9091/metrics 转发到 Logfire。
-  # Go 代码零改动 —— /metrics 已是标准 Prometheus text exposition v0.0.4。
-  #
-  # 已从 deploy/prometheus/rules.yml 迁移的关键告警（必须在 Logfire 侧配置）：
-  # 1. RateLimiterDegraded (unirate_redis_breaker_open > 0, for 1m) - CRITICAL
-  #    限流静默失效没有任何用户可见症状，这是最重要的告警。
-  # 2. DegradedDecisionRate (sum(rate(unirate_degraded_decisions_total[5m])) > 1, for 2m)
-  # 3. HighRejectRate (reject / total > 0.3, for 5m)
-  # 4. RedisErrorsElevated (sum(rate(unirate_redis_errors_total[5m])) > 5, for 2m)
-  # 5. ConcurrencyLeakSuspected (min_over_time(unirate_concurrency_in_flight[15m]) > 10 且无流量, for 10m) - CRITICAL
-  # 6. ConfigStale (unirate_config_version == 0, for 5m) - CRITICAL
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION:-0.115.1}
-    container_name: unirate-otel-collector
-    command: ["--config=/etc/otelcol/collector.yaml"]
-    volumes:
-      - ./deploy/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
-    environment:
-      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:?LOGFIRE_TOKEN 未设置。请在 .env 中配置 Logfire write token}
-      # 美区 logfire-us / 欧区 logfire-eu，按账号所属区域选择
-      LOGFIRE_ENDPOINT: ${LOGFIRE_ENDPOINT:-https://logfire-us.pydantic.dev}
-      # 指标降频的唯一正确手段：拉长抓取间隔。
-      # 不要对指标做概率采样——会破坏 counter 单调性，令 rate() 出现负值。
-      OTEL_SCRAPE_INTERVAL: ${OTEL_SCRAPE_INTERVAL:-15s}
-      OTEL_LOG_LEVEL: ${OTEL_LOG_LEVEL:-warn}
-      OTEL_DEBUG_VERBOSITY: ${OTEL_DEBUG_VERBOSITY:-basic}
-      DEPLOY_ENV: ${DEPLOY_ENV:-dev}
-    depends_on: [gateway]
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
-    read_only: true
-    healthcheck:
-      test: ["CMD", "/otelcol-contrib", "--version"]
-      interval: 30s
-      timeout: 5s
       retries: 3
     networks: [unirate]
     logging: *default-logging

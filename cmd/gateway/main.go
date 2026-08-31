@@ -41,11 +41,34 @@ func run() error {
 		"proxy", rt.ProxyAddr, "admin", rt.AdminAddr, "obs", rt.ObsAddr,
 		"instances", rt.Instances)
 
-	rdb := newRedis(rt)
-	defer func() { _ = rdb.Close() }()
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Logfire 直接推送（可选）
+	var logfireShutdown func(context.Context) error
+	if token := os.Getenv("LOGFIRE_TOKEN"); token != "" {
+		lfCfg := obs.LogfireConfig{
+			Token:    token,
+			Endpoint: os.Getenv("LOGFIRE_ENDPOINT"),
+			Interval: 15 * time.Second,
+			Env:      os.Getenv("DEPLOY_ENV"),
+		}
+		if v := os.Getenv("OTEL_SCRAPE_INTERVAL"); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				lfCfg.Interval = d
+			}
+		}
+		var err error
+		logfireShutdown, err = obs.InitLogfireExporter(lfCfg, log)
+		if err != nil {
+			log.Error("failed to initialize logfire exporter; metrics will only be available via /metrics", "err", err)
+		} else {
+			log.Info("logfire direct push enabled", "interval", lfCfg.Interval)
+		}
+	}
+
+	rdb := newRedis(rt)
+	defer func() { _ = rdb.Close() }()
 
 	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
@@ -277,6 +300,16 @@ func run() error {
 	if err := proxySrv.Shutdown(sctx); err != nil {
 		log.Warn("proxy shutdown timed out; some in-flight requests were cut", "err", err)
 	}
+
+	// Flush 最后一批指标到 Logfire
+	if logfireShutdown != nil {
+		flushCtx, flushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := logfireShutdown(flushCtx); err != nil {
+			log.Warn("logfire shutdown incomplete; last batch may be lost", "err", err)
+		}
+		flushCancel()
+	}
+
 	log.Info("gateway stopped")
 	return nil
 }
