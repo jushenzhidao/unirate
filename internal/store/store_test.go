@@ -91,6 +91,43 @@ func TestUpsertSuffixDialects(t *testing.T) {
 	}
 }
 
+// 列名白名单是 UpsertSuffix 拼接 SQL 的安全前提。
+// 这道校验没有覆盖，等于安全论证只写在注释里。
+func TestUpsertSuffixRejectsUnsafeIdentifiers(t *testing.T) {
+	payloads := []string{
+		"cfg_value=1; DROP TABLE biz_config--",
+		"cfg_value`",
+		"cfg value",
+		"CfgValue",
+		"1col",
+		"",
+		"cfg_value)",
+	}
+	for _, bad := range payloads {
+		t.Run(bad, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("expected panic for identifier %q", bad)
+				}
+			}()
+			_ = (&DB{Kind: KindSQLite}).UpsertSuffix([]string{"cfg_key"}, []string{bad})
+		})
+	}
+
+	// 合法标识符不得误伤
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("unexpected panic for valid identifiers: %v", r)
+			}
+		}()
+		_ = (&DB{Kind: KindSQLite}).UpsertSuffix(
+			[]string{"cfg_key"},
+			[]string{"cfg_value", "operator", "path_strip_prefix", "rules_json", "v2_col"},
+		)
+	}()
+}
+
 // 端到端验证：建表 → upsert 覆盖 → WAL 生效。
 // 这三点是 SQLite 替换 MySQL 的全部前提假设。
 func TestMigrateAndUpsertRoundTrip(t *testing.T) {

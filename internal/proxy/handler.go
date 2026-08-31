@@ -256,6 +256,13 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, opt *Options,
 		defer cancel()
 	}
 
+	// uurl 的 host 部分来自 target.BaseURL，而 target 由 handler.go 上游的
+	// h.res.Resolve() 产出 —— 该函数已完成 scheme 白名单、host 白名单、
+	// 内网 CIDR 黑名单与 DNS rebinding 校验（见 upstream/resolver.go），
+	// 违规时返回 ErrUpstreamBlocked 并在此之前以 403 中断。
+	// path/query 部分不参与 host 决策，无法改变请求目标。
+	// gosec 的污点分析不跨包追踪校验函数，故为已核实的误报。
+	// #nosec G704 -- SSRF 已在 upstream.Resolve 处强制校验，覆盖见 resolver_test.go:TestSSRFBlocked
 	req, err := http.NewRequestWithContext(ctx, r.Method, uurl, body)
 	if err != nil {
 		h.writeError(w, r, http.StatusBadGateway, "bad_upstream_url", err.Error(), reqID)
@@ -280,6 +287,8 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, opt *Options,
 	}
 
 	upstreamStart := time.Now()
+	// req.URL 与上面同源，校验依据同前。
+	// #nosec G704 -- 同上，目标地址已由 upstream.Resolve 校验
 	resp, err := client.Do(req)
 	// 上游往返延迟与端到端延迟分开度量。两者之差即为网关自身开销
 	// （元数据提取 + 准入判定 + Redis 往返），是判断"慢在谁"的唯一依据。

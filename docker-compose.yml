@@ -112,6 +112,11 @@ services:
       TRUSTED_PROXY_HOPS: "0"
       # 请求头指定上游默认关闭（SSRF 防护）
       ALLOW_HEADER_UPSTREAM: "false"
+      # SSRF 白名单，与上一行是同一道防线的两半。
+      # 留空 = 不限制上游主机（仅在 ALLOW_HEADER_UPSTREAM=false 时才安全）。
+      # 一旦把上面那行改成 true，这里必须同时填写允许的上游主机，
+      # 否则请求方可让网关访问任意内网地址（含云元数据 169.254.169.254）。
+      UPSTREAM_ALLOWLIST: ${UPSTREAM_ALLOWLIST:-}
 
       UPSTREAM_TIMEOUT: 60s
       TOKEN_FLUSH_INTERVAL: 1s
@@ -204,9 +209,14 @@ services:
       - ./deploy/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
     environment:
       # Logfire write token 属于 Tier 0 凭证：只从 .env 读取，绝不给默认值。
-      # 这里不能用 ${VAR:?err} 强制语法——compose 的变量插值发生在 profile
-      # 过滤之前，未设置会让所有 compose 命令失败，可选组件反而卡死整个栈。
-      # 缺失校验交给下面的 entrypoint，只在本服务真正启动时才生效。
+      # 是本文件唯一无法做「缺失即失败」硬校验的凭证，两条路都实测不可行：
+      #   1. 此处 ${VAR:?err} —— compose 插值发生在 profile 过滤之前，
+      #      未设置会让所有 compose 命令失败，可选组件反而卡死整个栈；
+      #   2. collector.yaml 里 ${env:VAR:?err} —— otelcol v0.115.1 不支持，
+      #      会把整串当变量名，连填了 token 都起不来。
+      # 现状：缺失时 collector.yaml 注入占位串 LOGFIRE_TOKEN-NOT-SET，
+      # Logfire 返 401，日志里搜该串即可定位。属已知可诊断降级，非静默失效。
+      # 本服务刻意不设 entrypoint —— 不为此再套一层 shell 包装。
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
       # 美区 logfire-us / 欧区 logfire-eu，按账号所属区域选择
       LOGFIRE_ENDPOINT: ${LOGFIRE_ENDPOINT:-https://logfire-us.pydantic.dev}

@@ -78,12 +78,16 @@ jobs:
           diff go.mod go.mod.bak || { echo "::error::go.mod 未同步，请本地执行 go mod tidy"; exit 1; }
           diff go.sum go.sum.bak || { echo "::error::go.sum 未同步，请本地执行 go mod tidy"; exit 1; }
 
-      # 版本需与 GO_VERSION 同步向上：golangci-lint 用自身编译时的 Go 做类型
-      # 检查，旧版遇到更新的工具链会整体报加载错误，而非报出具体问题。
-      # v1.64.8 已实测可在 Go 1.25 下编译并通过本仓库全部检查。
-      - uses: golangci/golangci-lint-action@v6
+      # 版本约束的判据是 go.mod 的 go 指令，不是 runner 的工具链版本：
+      # golangci-lint 若「自身编译用的 Go」低于「go.mod 声明的目标 Go」，
+      # 会直接 exit 3 报 can't load config，而非报出具体 lint 问题。
+      # 历史踩坑：modernc.org/sqlite 要求 go 1.25.0，把 go.mod 顶上去后，
+      # 用 Go 1.24 构建的 v1.64.8 立即失效（此前注释误判为「Go 1.25 可用」）。
+      # v1 系列终版即 v1.64.8，无更新可用，故迁至 v2；v2 需搭配 action@v7，
+      # 且 .golangci.yml 必须为 version: "2" 格式。
+      - uses: golangci/golangci-lint-action@v7
         with:
-          version: v1.64.8
+          version: v2.13.2
           args: --timeout=5m
 
   unit-test:
@@ -247,6 +251,20 @@ jobs:
     name: 端到端验收
     runs-on: ubuntu-latest
     needs: [lint, unit-test]
+    # e2e 必须叠加测试 overlay，两个 -f 缺一不可，且顺序不能反。
+    # overlay 提供两样 e2e 的硬依赖：mock-upstream 夹具容器，
+    # 以及 gateway 的 SEED_SQL_DIR 与 ./deploy/seed 挂载（断言数据来源）。
+    # 只跑 docker compose up 时网关能起来、/live 也通，
+    # 但 run.sh 的前置检查会在「mock-upstream 未运行」处退出 1。
+    #
+    # 定义为 job 级 env 而非在每个 step 里重复写：本 job 有 6 处 compose 调用，
+    # 其中「失败时导出日志」和「清理」两处漏掉 overlay 不会让 CI 变红，
+    # 只会静默漏掉 mock-upstream 的日志、并把它的容器留给下一次运行，
+    # 属于查起来很费时的那类问题。
+    #
+    # 与 Makefile 的 TEST_COMPOSE 保持同义，两边改动需同步。
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f docker-compose.test.yml
     steps:
       - uses: actions/checkout@v4
 
@@ -279,9 +297,9 @@ jobs:
           [ "${#token}" -ge 32 ] || { echo "生成的令牌长度不足"; exit 1; }
           grep -E '^(PROXY_PORT|OBS_PORT|ADMIN_PORT)=' .env
 
-      - name: 启动完整栈
+      - name: 启动完整栈（含测试夹具）
         run: |
-          docker compose up -d --build
+          $COMPOSE up -d --build
           echo "等待网关就绪..."
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:29091/ready >/dev/null 2>&1; then
@@ -293,13 +311,13 @@ jobs:
             # 真正的 fatal 行淹没在反复的启动日志里。
             # 注意：单服务 logs 不带 "unirate-gateway |" 前缀，
             # 只能直接匹配 fatal: 本身。
-            if docker compose logs gateway 2>/dev/null | grep -q 'fatal:'; then
+            if $COMPOSE logs gateway 2>/dev/null | grep -q 'fatal:'; then
               echo "网关启动即 fatal，终止等待："
-              docker compose logs gateway 2>/dev/null | grep 'fatal:' | tail -3
+              $COMPOSE logs gateway 2>/dev/null | grep 'fatal:' | tail -3
               exit 1
             fi
             if [ "$i" = "60" ]; then
-              echo "网关启动超时"; docker compose logs --tail=200; exit 1
+              echo "网关启动超时"; $COMPOSE logs --tail=200; exit 1
             fi
             sleep 1
           done
@@ -313,8 +331,8 @@ jobs:
 
       - name: 失败时导出日志
         if: failure()
-        run: docker compose logs --tail=400
+        run: $COMPOSE logs --tail=400
 
       - name: 清理
         if: always()
-        run: docker compose down -v
+        run: $COMPOSE down -v

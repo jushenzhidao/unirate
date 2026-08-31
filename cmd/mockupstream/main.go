@@ -47,6 +47,9 @@ func main() {
 		})
 	})
 
+	// addr 来自 LISTEN_ADDR 环境变量（部署期输入），不来自任何请求数据；
+	// 且本程序仅用于 e2e，不进生产镜像。
+	// #nosec G706 -- addr 源自环境变量而非请求，无日志注入面
 	log.Printf("mock upstream listening on %s", addr)
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())

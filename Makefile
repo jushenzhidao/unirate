@@ -98,21 +98,24 @@ up-test: ## 启动完整栈 + 测试夹具（mock-upstream/demo 数据），e2e 
 		sleep 1; done; \
 		echo "启动超时"; $(TEST_COMPOSE) logs --tail=100; exit 1
 
-down: ## 停止并清理数据卷
-	docker compose down -v
+# 拆除与观测统一带 overlay：overlay 的服务集是生产编排的超集，
+# 不带它则 down 看不见 mock-upstream，残留端点会让网络删除失败
+# （报 "has active endpoints"），下一次 e2e 直接起不来。
+down: ## 停止并清理数据卷（含测试夹具）
+	$(TEST_COMPOSE) down -v
 
 logs: ## 跟踪网关日志
-	docker compose logs -f gateway
+	$(TEST_COMPOSE) logs -f gateway
 
-ps: ## 查看服务状态
-	docker compose ps
+ps: ## 查看服务状态（含测试夹具）
+	$(TEST_COMPOSE) ps
 
 # 种子 SQL 由 store.LoadSeeds 在每次启动时幂等重放（仅 SEED_SQL_DIR 生效），
 # 所以 demo 业务域本身不依赖清卷。这里仍 down -v 是为了保证验收基线干净：
 # 上一轮用例通过 Admin API 改过的规则、Token 预算余量都会留在
 # sqlite-data 卷与 redis 里，不清会让断言受历史状态影响而偶发失败。
 e2e: ## 端到端验收（自动重建含测试夹具的干净栈）
-	docker compose down -v
+	$(TEST_COMPOSE) down -v
 	$(MAKE) up-test
 	./test/e2e/run.sh
 
@@ -120,6 +123,6 @@ verify: vet test ## 提交前完整校验
 	@echo "校验通过"
 
 clean: redis-down ## 清理全部本地资源
-	-docker compose down -v
+	-$(TEST_COMPOSE) down -v
 	-docker volume rm unirate-gomod
 	-rm -f coverage.out

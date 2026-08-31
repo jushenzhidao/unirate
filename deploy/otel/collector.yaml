@@ -77,12 +77,15 @@ exporters:
   otlphttp/logfire:
     endpoint: ${env:LOGFIRE_ENDPOINT}
     headers:
-      # 用 ${env:VAR:?} 而非 ${env:VAR}：token 缺失时直接启动失败并报错，
-      # 而不是发出空 Authorization 头 —— 后者会让 Logfire 返回 401，
-      # Collector 无限重试，日志里只有重试噪音，属于典型静默失效。
-      # 校验放在这里而不是 compose 的变量插值层：插值发生在 profile 过滤
-      # 之前，写在那里会让未启用 logfire 的用户也无法执行任何 compose 命令。
-      Authorization: ${env:LOGFIRE_TOKEN:?LOGFIRE_TOKEN 未设置，请在 .env 中填入 Logfire write token}
+      # 这里无法做「缺失即报错」的必填校验，两条路都实测不可行：
+      #   1. ${env:VAR:?msg} —— otelcol v0.115.1 不支持该语法，会把整串
+      #      当变量名，命中 ^[a-zA-Z_][a-zA-Z0-9_]*$ 校验后启动失败；
+      #      即使 token 已填也一样起不来。
+      #   2. compose 层 ${VAR:?msg} —— 插值发生在 profile 过滤之前，
+      #      会让未启用 logfire 的用户也无法执行任何 compose 命令。
+      # 因此退一步：缺失时注入显式占位串而非空值。Logfire 返回 401 时
+      # 日志里能直接看到 token 未配置，不至于对着空 Authorization 头猜。
+      Authorization: ${env:LOGFIRE_TOKEN:-LOGFIRE_TOKEN-NOT-SET}
     compression: gzip
     timeout: 30s
     retry_on_failure:
