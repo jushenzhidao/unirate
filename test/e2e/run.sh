@@ -443,21 +443,33 @@ fi
 # ---------------------------------------------------------------------------
 sect "G. 指标与探针完整性"
 
-for m in unirate_requests_total unirate_rejected_total \
-         unirate_request_duration_seconds_bucket unirate_config_version \
-         unirate_redis_breaker_open unirate_concurrency_in_flight; do
-  if curl -fsS "$OBS/metrics" | grep -q "^${m}"; then
-    ok "指标存在: ${m}"
-  else
-    bad "指标缺失: ${m}"
-  fi
-done
-
-# Prometheus 抓取格式合法性：不得出现空标签名或格式错误
-if curl -fsS "$OBS/metrics" | grep -qE '^\s*[a-zA-Z_][a-zA-Z0-9_]*(\{[^}]*\})?\s+[-0-9]'; then
-  ok "metrics 输出符合 Prometheus 文本格式"
+# 只抓一次并复用：原先每个指标各抓一次，6 次独立请求既不是同一份快照，
+# 也让「抓取失败」和「指标缺失」在结果里长得一样 —— 上一次 CI 就是
+# 紧跟 Redis unpause 时首轮 curl 空返回，被误报成 unirate_requests_total 缺失。
+snap=$(curl -fsS --retry 3 --retry-delay 1 --retry-all-errors "$OBS/metrics" 2>/dev/null || true)
+if [ -z "$snap" ]; then
+  bad "无法抓取 $OBS/metrics" "后续指标断言全部跳过"
 else
-  bad "metrics 格式异常"
+  ok "成功抓取 metrics 快照（$(printf '%s\n' "$snap" | wc -l | tr -d ' ') 行）"
+
+  # 断言样本行而非 HELP/TYPE：带标签的 vec 在无样本时只输出注释行，
+  # 那种情况说明该路径一次都没被走到，同样需要暴露出来。
+  for m in unirate_requests_total unirate_rejected_total \
+           unirate_request_duration_seconds_bucket unirate_config_version \
+           unirate_redis_breaker_open unirate_concurrency_in_flight; do
+    if printf '%s\n' "$snap" | grep -q "^${m}[{ ]"; then
+      ok "指标存在: ${m}"
+    else
+      bad "指标缺失: ${m}" "已注册但无样本，或该代码路径未被覆盖"
+    fi
+  done
+
+  # Prometheus 抓取格式合法性：不得出现空标签名或格式错误
+  if printf '%s\n' "$snap" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_]*(\{[^}]*\})?[[:space:]]+-?[0-9]'; then
+    ok "metrics 输出符合 Prometheus 文本格式"
+  else
+    bad "metrics 格式异常"
+  fi
 fi
 
 # 业务端口不得暴露指标与探针（信息泄露）
