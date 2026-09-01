@@ -108,34 +108,74 @@
     metrics: function () { return request('admin/metrics', { raw: true }); }
   };
 
-  /* ---- 规则校验错误映射：后端返回英文技术文案，已知前缀翻中文，
-     未命中原文兜底显示，绝不吞（DESIGN.md §5.3）。 */
+  /* ---- 规则校验错误映射：后端返回英文技术文案，翻中文，未命中原文兜底，绝不吞。
+
+     注意：匹配**不可用 `^` 锚定**。除 :108 的 "rule name required" 外，rule.go 的
+     每一条都用 `fmt.Errorf("rule %q: ...", r.Name)` 包装，实际到达前端的是
+         rule "api-limit": limit must be > 0
+     开头是 `rule "` 而不是 `limit`。原实现 16 条里 15 条用了 `^`，
+     全部匹配不到，界面上永远显示英文原文。
+
+     另有两类与 `^` 无关的失配，一并修正：
+       - 词形不符：`rule name is required` / 实际 `rule name required`
+                   `at least one dimension` / 实际 `dimensions required`
+                   `invalid dimension`      / 实际 `unknown dimension %q`
+                   `invalid rule type`      / 实际 `unknown type %q`
+                   `invalid metric`         / 实际 `unknown metric %q`
+                   `global ... combined`    / 实际 `cannot combine with others`
+       - 结构不可达：`^watermark`（:181 静默改写成 80，从不报错）
+                     `^timeout`（:135 静默改写成 120，从不报错）
+                     `invalid algorithm`（Validate() 根本不校验算法枚举）
+                     `window is required`（空窗口走 invalid window %q）
+                     `limit must be`（已被 `limit must be > 0` 覆盖）
+         这 5 条对应的后端错误不存在，保留只会让人误以为覆盖了。已删除。
+
+     逐条锚定到 rule.go 的真实文案，顺序即优先级（具体在前、宽泛在后）。 */
   var RULE_ERR_MAP = [
-    [/^rule name is required/i, '规则名必填'],
-    [/^limit must be > 0/i, '限额必须大于 0'],
-    [/^limit must be/i, '限额取值非法'],
-    [/^max_concurrent must be > 0/i, '最大并发必须大于 0'],
-    [/^invalid window/i, '时间窗口格式非法（例如 1s / 5m / 1h / 1d / 1w）'],
-    [/^window is required/i, '时间窗口必填'],
-    [/^invalid rule type/i, '规则类型非法（仅 rate 或 concurrency）'],
-    [/^invalid metric/i, '计量对象非法（仅 request 或 token）'],
-    [/^invalid algorithm/i, '算法非法（仅固定窗口 / 滑动窗口 / 令牌桶）'],
-    [/^at least one dimension/i, '至少选择一个限流维度'],
-    [/^invalid dimension/i, '存在不支持的限流维度'],
-    [/global.*combined|combined.*global/i, 'global 是不分维度的全局限流，不能与具体维度组合'],
-    [/token_bucket.*token|token.*token_bucket/i,
+    // :108 —— 唯一不带 rule %q 前缀的一条
+    [/rule name required/i, '规则名必填'],
+    // :111
+    [/dimensions required/i, '至少选择一个限流维度'],
+    // :117 / :120
+    [/unknown dimension/i, '存在不支持的限流维度'],
+    [/duplicated dimension/i, '限流维度重复'],
+    // :124
+    [/dimension 'global' cannot combine/i,
+      'global 是不分维度的全局限流，不能与具体维度组合'],
+    // :133
+    [/max_concurrent must be > 0/i, '最大并发必须大于 0'],
+    // :142
+    [/limit must be > 0/i, '限额必须大于 0'],
+    // :100 —— 单位错误比 :81/:86 的通用窗口错误更具体，必须排在它前面
+    [/invalid window unit/i, '时间窗口单位非法（仅 s / m / h / d / w）'],
+    // :81 / :86
+    [/invalid window/i, '时间窗口格式非法（例如 30s / 5m / 2h / 1d / 2w）'],
+    // :154
+    [/unknown metric/i, '计量对象非法（仅 request 或 token）'],
+    // :164
+    [/token_bucket cannot be used with metric=token/i,
       '令牌桶是持久速率桶，与窗口内总量语义不兼容。Token 预算请用固定或滑动窗口'],
-    [/^burst/i, '突发容量取值非法'],
-    [/^watermark/i, '水位告警阈值取值非法（0-100）'],
-    [/^timeout/i, '持有超时取值非法']
+    // :172
+    [/burst too small for rate/i,
+      '突发容量过小，至少要等于「限额 ÷ 窗口秒数」向下取整的值'],
+    // :178
+    [/sliding_window with limit > 100000/i,
+      '滑动窗口限额上限 100000，超过会撑爆 ZSet 内存，请改用固定窗口'],
+    // :187
+    [/unknown type/i, '规则类型非法（仅 rate 或 concurrency）']
   ];
+
+  /* translateRuleError —— 剥掉 `rule "名字": ` 前缀后再展示。
+     前缀对用户无信息量（他正在编辑的就是这条规则），留着会把每条错误
+     都撑长一截，反而盖住真正的原因。未命中映射时也要剥。 */
+  var RULE_PREFIX = /^rule\s+"[^"]*":\s*/i;
 
   function translateRuleError(raw) {
     var s = String(raw || '').trim();
     for (var i = 0; i < RULE_ERR_MAP.length; i++) {
       if (RULE_ERR_MAP[i][0].test(s)) return RULE_ERR_MAP[i][1];
     }
-    return s; // 未命中不吞，原文显示
+    return s.replace(RULE_PREFIX, ''); // 未命中不吞，剥前缀后原文显示
   }
 
   /* ---- Toast ---- */
