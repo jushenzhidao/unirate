@@ -90,6 +90,21 @@ jobs:
           version: v2.13.2
           args: --timeout=5m
 
+      # 控制台前端是零构建的原生 JS，没有编译器兜底：调用一个不存在的导出
+      # （如 F.renderFoo 被改名）只会在用户点开抽屉那一刻炸 undefined is not
+      # a function，而 gofmt / vet / golangci-lint / go test 会全部报绿 ——
+      # 它们看不见 assets/*.js 之间的调用关系。本步补上那道检查，覆盖：
+      #   1) page-rules-form 引用的每个 F./V./P. 成员真实导出
+      #   2) rule-fields 用到的每个 ctx.X 由表单提供
+      #   3) JS 里 class: '...' 的每个类名在 CSS 中有定义
+      #   4) U.icon('x') 的 x 存在于 icons.svg
+      #   5) 禁令扫描（emoji / 硬编码色值 / innerHTML / eval）
+      #   6) 在最小 DOM 桩上真的把表单跑一遍（五个场景冒烟）
+      # 四层静态检查均经变异测试确认会变红，不是空跑的门禁。
+      # 用 node 自带能力实现，无 npm 依赖，故不需要 setup-node 与 install。
+      - name: 控制台资产接线校验
+        run: node scripts/verify-assets.js
+
   unit-test:
     name: 单元测试（含 race 与真实 Redis）
     runs-on: ubuntu-latest
