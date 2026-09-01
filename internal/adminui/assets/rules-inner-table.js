@@ -62,6 +62,25 @@
     ]);
   }
 
+  /* 工具栏：规则条数 + 新增入口。
+     空态与有规则态共用，否则空业务域会没有任何新增入口 —— 用户只能看到
+     一句「没有规则」的提示，无从下手（实测反馈）。 */
+  function toolbar(biz, rules, opts) {
+    var primary = rules.length === 0;
+    return U.el('div', { class: 'row', style: 'margin-bottom: var(--sp-2)' }, [
+      U.el('span', {
+        class: 'caps',
+        text: primary ? '限流规则' : '限流规则 ' + rules.length + ' 条'
+      }),
+      U.el('span', { class: 'spacer' }),
+      U.el('button', {
+        // 空态下这是该区域唯一可做的事，升为主按钮
+        class: primary ? 'btn btn--primary' : 'btn', type: 'button',
+        onclick: function () { opts.onCreate(biz); }
+      }, [U.icon('i-plus'), U.el('span', { text: '新增规则' })])
+    ]);
+  }
+
   /* render(biz, opts)
      opts.page      当前页码（由调用方持有）
      opts.onPage    翻页回调
@@ -70,10 +89,13 @@
   function render(biz, opts) {
     var rules = biz.rules || [];
     if (rules.length === 0) {
-      return U.el('div', { class: 'sub-wrap' }, U.el('div', { class: 'note' }, [
-        U.icon('i-info'),
-        U.el('span', { text: '该业务域没有规则，其流量会落到 * 兜底域的规则上。' })
-      ]));
+      return U.el('div', { class: 'sub-wrap' }, [
+        toolbar(biz, rules, opts),
+        U.el('div', { class: 'note' }, [
+          U.icon('i-info'),
+          U.el('span', { text: '该业务域没有规则，其流量会落到 * 兜底域的规则上。点击「新增规则」开始配置。' })
+        ])
+      ]);
     }
 
     var page = opts.page || 0;
@@ -86,13 +108,7 @@
     slice.forEach(function (r) { body.appendChild(ruleRow(biz, r, opts.onEdit)); });
 
     var wrap = U.el('div', { class: 'sub-wrap' }, [
-      U.el('div', { class: 'row', style: 'margin-bottom: var(--sp-2)' }, [
-        U.el('span', { class: 'caps', text: '限流规则 ' + rules.length + ' 条' }),
-        U.el('span', { class: 'spacer' }),
-        U.el('button', {
-          class: 'btn', type: 'button', onclick: function () { opts.onCreate(biz); }
-        }, [U.icon('i-plus'), U.el('span', { text: '新增规则' })])
-      ]),
+      toolbar(biz, rules, opts),
       U.el('div', { class: 'table-wrap' },
         U.el('table', { class: 'tbl tbl--inner' }, [head(), body]))
     ]);
