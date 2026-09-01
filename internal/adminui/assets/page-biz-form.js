@@ -97,6 +97,12 @@
       if (!draft.base_url && draft.biz !== '*') {
         API.toast('warn', '除 * 兜底域外，base_url 必填'); urlInput.focus(); return;
       }
+      // 后端只校验非空，形如 "xx" 的值能存进去，但转发时必然失败且只在运行期报错。
+      // 在这里拦掉，让错误停在配置期。
+      if (draft.base_url && !/^https?:\/\/[^\s/]+/.test(draft.base_url)) {
+        API.toast('warn', 'base_url 需以 http:// 或 https:// 开头，例如 https://api.openai.com/v1');
+        urlInput.focus(); return;
+      }
       saveBtn.disabled = true;
       U.clear(saveBtn);
       U.append(saveBtn, [U.icon('i-spinner', { class: 'spin' }), U.el('span', { text: '保存中' })]);
