@@ -32,7 +32,8 @@ func TestAssetsAreEmbedded(t *testing.T) {
 	want := []string{
 		"index.html", "tokens.css", "base.css", "layout.css", "components.css",
 		"overlay.css", "charts.css", "icons.svg",
-		"dom.js", "api.js", "overlay.js", "charts.js", "metrics.js", "rule-fields.js",
+		"dom.js", "api.js", "overlay.js", "charts.js", "metrics.js",
+		"rule-spec.js", "rule-validate.js", "rule-fields.js", "rule-preview.js",
 		"monitor-kpi.js", "rules-inner-table.js", "page-login.js", "page-monitor.js",
 		"page-rules.js", "page-rules-form.js", "page-biz-form.js", "page-audit.js",
 		"page-config.js", "page-policy.js", "app.js",
@@ -98,10 +99,15 @@ func TestScriptLoadOrder(t *testing.T) {
 		{"dom.js", "overlay.js"},
 		{"dom.js", "charts.js"},
 		{"api.js", "metrics.js"},
-		{"charts.js", "monitor-kpi.js"},          // MonitorKPI 用 Charts.sparkline
-		{"rule-fields.js", "page-rules-form.js"}, // RulesForm 用 RuleFields
-		{"overlay.js", "app.js"},                 // App 转发 Overlay.drawer
-		{"page-login.js", "app.js"},              // App.bind 调 PageLogin
+		{"charts.js", "monitor-kpi.js"},           // MonitorKPI 用 Charts.sparkline
+		{"rule-spec.js", "rule-validate.js"},      // 校验器读 RuleSpec 常量
+		{"rule-validate.js", "rule-fields.js"},    // 字段控件读 RuleValidate 判定
+		{"rule-spec.js", "rule-fields.js"},        // 字段控件读 RuleSpec 常量
+		{"dom.js", "rule-preview.js"},             // 预览层用 U.el 建节点
+		{"rule-preview.js", "page-rules-form.js"}, // RulesForm 用 RulePreview
+		{"rule-fields.js", "page-rules-form.js"},  // RulesForm 用 RuleFields
+		{"overlay.js", "app.js"},                  // App 转发 Overlay.drawer
+		{"page-login.js", "app.js"},               // App.bind 调 PageLogin
 	} {
 		a, okA := order[dep.first]
 		b, okB := order[dep.then]

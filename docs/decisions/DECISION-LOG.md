@@ -145,3 +145,25 @@
 
 [00:05] Phase 4 - 前端处理自身工具缺陷的顺序正确 - scan_test.go 的 stripJSCode 连字符串内容一起剥，而待断言的端点路径本身就在字符串里，三条断言必然误报。它没有因为「测试失败了」就改产品代码，而是先确认浏览器实测正常、再定位到自己工具有问题，拆出 stripJSComments 并写清两者分工 - 影响：反过来做就是为了让测试变绿而破坏正确代码
 ```
+
+## 2026-09-01 规则配置可视化（校验前移）
+
+```
+[13:30] Phase 1 - 悬而未决的后端缺陷 A：令牌桶 burst 下限判据与实际填充速率不一致，加载期门禁放过了真实运行态错配 - rule.go:171 用 int64 整除定下限（Burst < Limit/winSec 才拒），而 TokenBucketRate()（rule.go:192）用浮点 float64(Limit)/float64(winSec)，其唯一调用点 limiter.go:242 把它作为 Rate 送进 Lua 桶。语义后果：limit=10/window=3s/burst=3 通过加载期校验，但运行态是「桶容量 3、填充速率 3.33/s」，桶装不下一秒的填充量 - 影响：本轮不修，前端一律与 Validate() 当前行为对齐（Math.floor）。若要修，正确方向是调整 TokenBucketRate() 或桶容量语义，不是收紧门禁 —— 收紧会让今天能加载的存量配置明天加载失败。需独立回归
+
+[13:30] Phase 1 - 悬而未决的后端缺陷 B：watermark 越界静默回落 80，其中 <=0 半边不可改 - rule.go:181 是 <=0||>100 单一条件。关键约束：Rule.Watermark 为 int 无指针包装（rule.go:60），对比 Enabled *bool（:63）刻意用指针区分「显式 false」与「字段缺省」。故 YAML 省略 watermark 与显式写 0 解码后同为 0，<=0 分支承担「缺省取默认」职责，是绝大多数真实配置走的路径 - 影响：改成报错等于要求所有存量配置显式填写 watermark，加载期全线失败。>100 半边理论可安全改为报错但收益仅拦打字错误，倾向不做
+
+[13:30] Phase 1 - 裁决：界面禁止显示时区数字（架构师与设计师结论冲突，采纳架构师） - 设计师原主张显示「每日 00:00（UTC+8）重置」，依据 config/env.go:133 默认 8*3600。判其错：那只是 envInt 兜底默认，部署设 TZ_OFFSET_SECONDS=0 时界面仍显示 UTC+8，在运维最需要准确处给错数字。前端无合法途径拿运行时真值（无 policy key、snapshot 不含该字段），交叉验证 CONFIG-TIERING.md:81 / DECISION-LOG.md:66 / DEPLOYMENT.md:357 三处一致 - 影响：确立通用原则「拿不到运行时真值的量，不展示推算值，改为展示该值的来源」。界面点名变量名 TZ_OFFSET_SECONDS 并注明改动需重启；窗口下拉用原生 optgroup 分「滚动窗口 / 自然对齐」两族，让语义差别在展开那一刻可见
+
+[13:30] Phase 1 - 现有门禁的真实盲区：U+2502 全宽竖线逃过 emoji 扫描 - TestNoEmojiInAssets（adminui_test.go:243）正则为 [1F300-1F9FF、2600-27BF、FE00-FE0F]，U+2502 落在 U+2500-257F 不在任何区间。触发场景：设计稿把 Key 分隔符写成全宽 │，而 key.go:27 真值是 ASCII sep = "|"；同时 global 空值被写成 - 而真值是 _（limiter.go:171）。两处均为字符级偏差，纯人工比对挡不住 - 影响：rulespec_test.go 需加 key 格式断言，从 key.go 抽 sep / 四前缀 / maxRawLen=48 / 哈希前缀与长度 / global 空值，与 JS 侧比对
+
+[13:30] Phase 1 - 窗口预设值集三方不一致，定为代码现值 + 2w - DESIGN.md:240 写 1s/1m/5m/1h/1d/1w，README.md:115 写 1s/5m/1h/1d/2w，代码 rule-fields.js:19 是第三套。核 ParseWindow（rule.go:79-102）：接受任意正整数 + s/m/h/d/w，用户规格那五个是举例非白名单 - 影响：定为 ['1s','1m','5m','1h','1d','2w']，不按用户列表替换（移除 1m/1w 会让既有规则窗口值掉出预设、落进自定义输入框）。需同步修 DESIGN.md:240，否则文档继续互相矛盾
+
+[14:05] Phase 3 - 更正自身此前记述：HashToken 并非「无条件哈希」，空串有短路 - key.go:51-54 对 raw == "" 返回 "_" 而非 hex，与 safeVal(""} 行为一致。两者唯一区别是非空路径：safeVal 长度 ≤48 且不含 |/空格/制表/回车/换行 时保留明文、降级哈希带 h 前缀；HashToken 一律哈希且裸 24 hex 无前缀 - 影响：若按「无条件」实现预览，无 token 场景会渲染出一串 Redis 里不存在的 hex。已修 spec-rule-viz.md §3 该表为「空串 / 安全短值 / 其他」三列
+
+[14:20] Phase 3 - 实测确认既有缺陷：adminui/assets/api.js 的 RULE_ERR_MAP 对后端真实文案 11/12 未命中，规则校验错误几乎全部以英文原文暴露给用户 - 测法：探针触发 Validate() 取真实 err.Error()，再用 Node 原样 eval api.js 的 RULE_ERR_MAP 跑匹配（非人工读正则推断）。三类根因：(1) 全表 ^ 锚点失效，后端文案带 rule %q: 前缀；(2) 词形对不上，^rule name is required 实际是 rule name required（无 is）、/global.*combined/ 实际是 cannot combine（非 combined），去锚点也修不好；(3) duplicated dimension / unknown type / unknown metric / unknown dimension / dimensions required / sliding_window limit 超限 六类无映射，而表内 ^invalid rule type、^at least one dimension、^invalid dimension 三条与后端文案完全对不上，属照想象文案写的死规则。唯一命中的 token_bucket 那条纯属偶然——它是全表唯一无 ^ 锚点的 - 影响：已给出实测 0 未命中的修正表交付实现。并要求在 rulespec_test.go 加双向断言（每条后端错误至少被一条正则命中 + 表内无从不命中的死规则），因为此类失效完全静默、无测试会红，只是用户开始看到英文
+
+[14:20] Phase 3 - 更正架构师判断：token_bucket + metric=token 是加载期不可达组合，非 key 路由案例 - 架构师称该组合「走 tk 分支、algorithm 不参与 key 选择」。探针实测 rule.go:162 在加载期即拒绝该组合，永远到不了 limiter.go:220 的 switch；metric=token 配 fixed_window / sliding_window / 空 均通过（空落库 fixed_window）。其结论「algorithm 不影响 key」结果对但推理链错，真实原因是另一取值被门禁禁掉、剩余可达取值全走 tk - 影响：sampleKey() 不应为该组合准备输出路径；该状态仅在「编辑既有非法规则」时出现于界面，应由校验器报错 + disabledFn 处理。本轮第二次「读分支推运行态、漏看加载期门禁」（前一次为 envInt 兜底默认当运行时真值）。已记入 arch-rule-viz.md §3.4.1b 与 spec-rule-viz.md §3
+
+[14:20] Phase 3 - 更正 Spec 自身错误：ParseWindow 接受 +1h 与 01h，前端不得拒绝 - 实现者在代码注释中驳回 Spec §2「必须拒绝 +1h」的要求并以实测为准，复核确认其正确：strconv.ParseInt(s,10,64) 允许前导正号与前导零。完整实测边界：接受 1h/01h/+1h/9223372036854775807s；拒绝 1.5h/-1h/0s/1_0h/0x10h/1e2s/" 1h"/"1h "/1/""/h/9223372036854775808s - 影响：确立纪律「镜像后端校验时宁松不紧」——前端拦住后端会接受的配置，用户看到「界面说不行但线上明明在跑」，比漏报更难排查，严的一侧由后端权威终审兜底。另：int64 溢出必须按字符串比长度判，Number('9223372036854775808') 静默得近似值且 isFinite 为真，会放过后端拒绝的输入
+```

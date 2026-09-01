@@ -101,6 +101,9 @@ textarea.field { height: auto; min-height: 72px; padding: var(--sp-2) var(--fiel
 .seg > button + button { border-left: 1px solid var(--c-border-field); }
 .seg > button[aria-pressed="true"] { background: var(--c-surface-3); color: var(--c-fg); font-weight: var(--fw-emph); }
 .seg > button:disabled { color: var(--c-disabled); cursor: not-allowed; }
+/* aria-disabled 而非 disabled：保留 Tab 序，让读屏用户能停在按钮上听到
+   aria-describedby 指向的不可用原因。disabled 的按钮不可聚焦，原因就念不出来。 */
+.seg > button[aria-disabled="true"] { color: var(--c-disabled); cursor: not-allowed; }
 
 /* 维度 chips */
 .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
