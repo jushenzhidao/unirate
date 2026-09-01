@@ -798,9 +798,10 @@ func funcBody(t *testing.T, src, name string) string {
 	for i := start; i < len(src); i++ {
 		c := src[i]
 		if inStr != 0 {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == inStr {
+			case inStr:
 				inStr = 0
 			}
 			continue
